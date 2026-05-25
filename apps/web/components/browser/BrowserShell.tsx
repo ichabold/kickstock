@@ -1,27 +1,21 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useGameStore } from '@/stores/gameStore';
+import { useGameStore, fmt, pctOf, buildMatchesForCurrentDay } from '@/stores/gameStore';
 import { CALENDAR, NATIONS, GROUPS } from '@kickstock/constants';
-import { fmt } from '@kickstock/game-engine';
+import { buildGroupStandingsUI } from '@kickstock/game-engine';
 import TradeModal from '@/components/shared/TradeModal';
-import type { Nation, TradeMode } from '@kickstock/types';
+import type { Nation, TradeMode, StoredMatchResult } from '@kickstock/types';
 
-// ─── types ────────────────────────────────────────────────────────────────────
-type ViewId = 'home' | 'schedule' | 'market' | 'portfolio' | 'standings' | 'bracket' | 'ranking';
-interface MatchResult { matchId:string; teamA:string; teamB:string; scoreA:number; scoreB:number; res:string; isUpset:boolean; elimId:string|null; }
-interface DivResult { nationId:string; amount:number; }
-interface SimResult { results:MatchResult[]; dividends:DivResult[]; }
-
-const gN = (id:string) => NATIONS.find(n=>n.id===id);
+const gN = (id: string) => NATIONS.find(n => n.id === id);
 
 // ─── Sparkline ────────────────────────────────────────────────────────────────
-function Spark({ history, up }: { history:number[]; up:boolean }) {
+function Spark({ history, up }: { history: number[]; up: boolean }) {
   if (history.length < 2) return <svg className="spk" viewBox="0 0 100 24" preserveAspectRatio="none"><line x1="0" y1="12" x2="100" y2="12" stroke="#333" strokeWidth="1" strokeDasharray="3,2"/></svg>;
   const mn = Math.min(...history), mx = Math.max(...history), rng = mx - mn || 1;
   const pts = history.map((v,i) => `${(i/(history.length-1))*100},${24-((v-mn)/rng)*22}`).join(' ');
   const col = up ? '#00FF87' : '#FF3B5C';
-  const id = `sg${Math.random().toString(36).slice(2,6)}`;
+  const id  = `sg${Math.random().toString(36).slice(2,6)}`;
   return (
     <svg className="spk" viewBox="0 0 100 24" preserveAspectRatio="none">
       <defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={col} stopOpacity=".25"/><stop offset="100%" stopColor={col} stopOpacity="0"/></linearGradient></defs>
@@ -31,24 +25,24 @@ function Spark({ history, up }: { history:number[]; up:boolean }) {
 }
 
 // ─── StockTile ─────────────────────────────────────────────────────────────────
-function StockTile({ nation, onBuy, onSell }: { nation:Nation; onBuy:()=>void; onSell:()=>void }) {
-  const prices    = useGameStore(s=>s.prices);
-  const history   = useGameStore(s=>s.priceHistory[nation.id]??[]);
-  const portfolio = useGameStore(s=>s.portfolio);
-  const eliminated= useGameStore(s=>s.eliminated);
+function StockTile({ nation, onBuy, onSell }: { nation: Nation; onBuy: () => void; onSell: () => void }) {
+  const prices     = useGameStore(s => s.prices);
+  const history    = useGameStore(s => s.priceHistory[nation.id] ?? []);
+  const portfolio  = useGameStore(s => s.portfolio);
+  const eliminated = useGameStore(s => s.eliminated);
 
-  const price  = prices[nation.id]??nation.p;
-  const held   = portfolio[nation.id]??0;
+  const price  = prices[nation.id] ?? nation.p;
+  const held   = portfolio[nation.id] ?? 0;
   const isElim = eliminated.includes(nation.id);
-  const pct    = ((price-nation.p)/nation.p*100).toFixed(1);
+  const pct    = ((price - nation.p) / nation.p * 100).toFixed(1);
   const up     = price >= nation.p;
 
   return (
-    <div className={`stile${held>0?' held':''}${isElim?' elim':''}`}>
+    <div className={`stile${held > 0 ? ' held' : ''}${isElim ? ' elim' : ''}`}>
       <div className="st-top">
         <span className="st-flag">{nation.flag}</span>
         <span className="st-name">{nation.name}</span>
-        {held>0 && <span className="st-held">×{held}</span>}
+        {held > 0 && <span className="st-held">×{held}</span>}
       </div>
       <div className="st-badges">
         <span className="bdg g">GR.{nation.group}</span>
@@ -57,14 +51,14 @@ function StockTile({ nation, onBuy, onSell }: { nation:Nation; onBuy:()=>void; o
       <div className="st-pr">
         <span className="st-price">{Math.round(price)}</span>
         <span className="st-kc">KC</span>
-        <span className={`st-pct ${up?'up':'dn'}`}>{up?'▲+':'▼'}{Math.abs(Number(pct))}%</span>
+        <span className={`st-pct ${up ? 'up' : 'dn'}`}>{up ? '▲+' : '▼'}{Math.abs(Number(pct))}%</span>
       </div>
       <Spark history={history} up={up}/>
       {isElim
         ? <div className="bdis">💀 ÉLIMINÉ · 1 KC</div>
         : <div className="st-acts">
             <button className="bbuy" onClick={onBuy}>▲ BUY</button>
-            <button className="bsell" onClick={onSell} disabled={held===0}>▼ SELL</button>
+            <button className="bsell" onClick={onSell} disabled={held === 0}>▼ SELL</button>
           </div>
       }
     </div>
@@ -72,30 +66,42 @@ function StockTile({ nation, onBuy, onSell }: { nation:Nation; onBuy:()=>void; o
 }
 
 // ─── HomeView ─────────────────────────────────────────────────────────────────
-function HomeView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
-  const dayIndex = useGameStore(s=>s.dayIndex);
-  const prevDay  = CALENDAR[dayIndex-1];
-  const curDay   = CALENDAR[dayIndex];
+function HomeView({ onTrade }: { onTrade: (n: Nation, m: TradeMode) => void }) {
+  const dayIndex     = useGameStore(s => s.dayIndex);
+  const matchResults = useGameStore(s => s.matchResults);
+  const state        = useGameStore(s => s);
+  const curDay       = CALENDAR[dayIndex];
+  const prevResults  = matchResults[dayIndex - 1] ?? [];
 
+  const todayMatches = useMemo(() => curDay ? buildMatchesForCurrentDay(state) : [], [curDay, state]);
   const todayNations = useMemo(() => {
     const ids = new Set<string>();
-    (curDay?.matches??[]).forEach(m=>{ ids.add(m.a); ids.add(m.b); });
-    return NATIONS.filter(n=>ids.has(n.id));
-  }, [curDay]);
+    todayMatches.forEach(m => { ids.add(m.a); ids.add(m.b); });
+    return NATIONS.filter(n => ids.has(n.id));
+  }, [todayMatches]);
 
   return (
     <div className="view-home">
       <div className="home-l">
-        {prevDay && (
+        {prevResults.length > 0 && (
           <>
-            <div className="day-hdr"><span className="dot" style={{background:'#555'}}/>JOURNÉE PRÉCÉDENTE · {prevDay.label}</div>
+            <div className="day-hdr"><span className="dot" style={{background:'#555'}}/>JOURNÉE PRÉCÉDENTE · {CALENDAR[dayIndex - 1]?.label}</div>
             <div className="matches-scroll">
-              {prevDay.matches.map((m,i)=>(
-                <div key={i} className="mrow">
-                  <div className="mteams">{gN(m.a)?.flag} {gN(m.a)?.name} <span className="vs">vs</span> {gN(m.b)?.flag} {gN(m.b)?.name}</div>
-                  <div className="mbadge done">FT</div>
-                </div>
-              ))}
+              {prevResults.map((r, i) => {
+                const nA = gN(r.a), nB = gN(r.b);
+                const winA = r.res === 'A', winB = r.res === 'B';
+                return (
+                  <div key={i} className="mrow past">
+                    <div className="mteams">
+                      <span style={{color: winA ? 'var(--gold)' : winB ? 'var(--mu)' : undefined}}>{nA?.flag} {nA?.name}</span>
+                      <span className="vs"> vs </span>
+                      <span style={{color: winB ? 'var(--gold)' : winA ? 'var(--mu)' : undefined}}>{nB?.flag} {nB?.name}</span>
+                    </div>
+                    <div className="mscore">{r.scoreA}–{r.scoreB}{r.penWinner ? ' P' : r.etRes ? ' AET' : ''}</div>
+                    <div className="mbadge done">FT</div>
+                  </div>
+                );
+              })}
             </div>
           </>
         )}
@@ -103,25 +109,25 @@ function HomeView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
           <>
             <div className="day-hdr"><span className="dot" style={{background:'var(--gold)'}}/>JOURNÉE COURANTE · {curDay.label}</div>
             <div className="matches-scroll">
-              {curDay.matches.length>0 ? curDay.matches.map((m,i)=>(
+              {todayMatches.length > 0 ? todayMatches.map((m, i) => (
                 <div key={i} className="mrow">
                   <div className="mteams">{gN(m.a)?.flag} {gN(m.a)?.name} <span className="vs">vs</span> {gN(m.b)?.flag} {gN(m.b)?.name}</div>
-                  {m.venue && <div className="mtime" style={{fontSize:9,color:'var(--di)'}}>{m.venue}</div>}
+                  {m.venue && <div className="mtime" style={{fontSize: 9, color: 'var(--di)'}}>{m.venue}</div>}
                   <div className="mbadge soon">À venir</div>
                 </div>
-              )) : <div style={{padding:'12px',fontSize:11,color:'var(--di)'}}>Phase KO — matchs déterminés dynamiquement</div>}
+              )) : <div style={{padding: '12px', fontSize: 11, color: 'var(--di)'}}>Phase KO — matchs déterminés dynamiquement</div>}
             </div>
           </>
         )}
-        {!curDay && <div style={{padding:24,textAlign:'center',color:'var(--gold)',fontFamily:'Bebas Neue',fontSize:28,letterSpacing:4}}>🏆 TOURNOI TERMINÉ</div>}
+        {!curDay && <div style={{padding: 24, textAlign: 'center', color: 'var(--gold)', fontFamily: 'Bebas Neue', fontSize: 28, letterSpacing: 4}}>🏆 TOURNOI TERMINÉ</div>}
       </div>
       <div className="home-r">
         <div className="hr2">ACTIONS · MATCHS DU JOUR</div>
-        {todayNations.length>0
+        {todayNations.length > 0
           ? <div className="tiles-grid">
-              {todayNations.map(n=><StockTile key={n.id} nation={n} onBuy={()=>onTrade(n,'buy')} onSell={()=>onTrade(n,'sell')}/>)}
+              {todayNations.map(n => <StockTile key={n.id} nation={n} onBuy={() => onTrade(n, 'buy')} onSell={() => onTrade(n, 'sell')}/>)}
             </div>
-          : <div style={{padding:40,textAlign:'center',color:'var(--di)',fontSize:12}}>Aucun match aujourd'hui ou phase KO</div>
+          : <div style={{padding: 40, textAlign: 'center', color: 'var(--di)', fontSize: 12}}>Aucun match aujourd'hui ou phase KO</div>
         }
       </div>
     </div>
@@ -129,29 +135,28 @@ function HomeView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
 }
 
 // ─── MarketView ───────────────────────────────────────────────────────────────
-function MarketView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
+function MarketView({ onTrade }: { onTrade: (n: Nation, m: TradeMode) => void }) {
   const [filter, setFilter] = useState('');
   const [group, setGroup]   = useState('ALL');
-  const prices    = useGameStore(s=>s.prices);
 
-  const filtered = useMemo(()=>
-    NATIONS.filter(n=>
-      (group==='ALL'||n.group===group) &&
-      (filter===''||n.name.toLowerCase().includes(filter.toLowerCase())||n.id.toLowerCase().includes(filter.toLowerCase()))
-    ).sort((a,b)=>a.name.localeCompare(b.name))
+  const filtered = useMemo(() =>
+    NATIONS.filter(n =>
+      (group === 'ALL' || n.group === group) &&
+      (filter === '' || n.name.toLowerCase().includes(filter.toLowerCase()) || n.id.toLowerCase().includes(filter.toLowerCase()))
+    ).sort((a, b) => a.name.localeCompare(b.name))
   , [filter, group]);
 
   return (
     <div className="mkt-wrap">
       <div className="mkt-controls">
-        <input className="si" placeholder="🔍 Rechercher un pays..." value={filter} onChange={e=>setFilter(e.target.value)}/>
-        {GROUPS.map(g=>(
-          <button key={g} className={`fp${group===g?' on':''}`} onClick={()=>setGroup(g)}>{g}</button>
+        <input className="si" placeholder="🔍 Rechercher un pays..." value={filter} onChange={e => setFilter(e.target.value)}/>
+        {GROUPS.map(g => (
+          <button key={g} className={`fp${group === g ? ' on' : ''}`} onClick={() => setGroup(g)}>{g}</button>
         ))}
       </div>
       <div className="mkt-grid-wrap">
         <div className="mkt-grid">
-          {filtered.map(n=><StockTile key={n.id} nation={n} onBuy={()=>onTrade(n,'buy')} onSell={()=>onTrade(n,'sell')}/>)}
+          {filtered.map(n => <StockTile key={n.id} nation={n} onBuy={() => onTrade(n, 'buy')} onSell={() => onTrade(n, 'sell')}/>)}
         </div>
       </div>
     </div>
@@ -160,83 +165,156 @@ function MarketView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
 
 // ─── ScheduleView ─────────────────────────────────────────────────────────────
 function ScheduleView() {
-  const dayIndex  = useGameStore(s=>s.dayIndex);
-  const eliminated = useGameStore(s=>s.eliminated);
-
-  const koPhases = [
-    { label:'HUITIÈMES DE FINALE · R32', days: CALENDAR.filter(d=>d.phase==='R32') },
-    { label:'QUARTS DE FINALE', days: CALENDAR.filter(d=>d.phase==='QF') },
-    { label:'DEMI-FINALES', days: CALENDAR.filter(d=>d.phase==='SF') },
-    { label:'TROISIÈME PLACE', days: CALENDAR.filter(d=>d.phase==='3rd') },
-    { label:'🏆 FINALE', days: CALENDAR.filter(d=>d.phase==='Final') },
-  ];
+  const dayIndex     = useGameStore(s => s.dayIndex);
+  const matchResults = useGameStore(s => s.matchResults);
+  const state        = useGameStore(s => s);
 
   return (
     <div className="view-sched">
       <div className="sched-l">
-        <div className="day-hdr">TOUS LES MATCHS</div>
+        <div className="day-hdr">TOUS LES MATCHS — PHASE DE GROUPES</div>
         <div className="matches-scroll">
-          {CALENDAR.map((day,di)=>(
-            day.matches.map((m,mi)=>(
-              <div key={`${di}-${mi}`} className={`mrow${di===dayIndex?' cur':di<dayIndex?' past':''}`}>
-                <div className="mtime">J·{di+1}</div>
-                <div className="mteams">
-                  {gN(m.a)?.flag} {gN(m.a)?.name} <span className="vs">vs</span> {gN(m.b)?.flag} {gN(m.b)?.name}
+          {CALENDAR.filter(d => !d.isKO).map((day, di) => {
+            const played   = matchResults[di];
+            const isPast   = di < dayIndex;
+            const isCur    = di === dayIndex;
+            return (
+              <div key={di}>
+                <div className="sched-day-lbl" style={{
+                  padding: '4px 8px', fontSize: 9, fontWeight: 700, letterSpacing: 2,
+                  color: isCur ? 'var(--gold)' : 'var(--mu)', marginTop: 6,
+                }}>
+                  {isCur ? '▶ ' : ''}{day.label} — {day.phase}
                 </div>
-                <div className={`mbadge ${di<dayIndex?'done':di===dayIndex?'soon':''}`}>
-                  {di<dayIndex?'FT':di===dayIndex?'Prochain':'À venir'}
-                </div>
+                {day.matches.map((m, mi) => {
+                  const res = played?.find(r => (r.a === m.a && r.b === m.b) || (r.a === m.b && r.b === m.a));
+                  const flipped = res && res.a === m.b;
+                  const sA = flipped ? res!.scoreB : res?.scoreA;
+                  const sB = flipped ? res!.scoreA : res?.scoreB;
+                  const resA = flipped ? (res?.res === 'A' ? 'B' : res?.res === 'B' ? 'A' : 'draw') : res?.res;
+                  return (
+                    <div key={mi} className={`mrow${isCur ? ' cur' : isPast ? ' past' : ''}`}>
+                      <div className="mtime">J·{di+1}</div>
+                      <div className="mteams">
+                        <span style={{color: res ? (resA === 'A' ? 'var(--gold)' : resA !== 'draw' ? 'var(--mu)' : undefined) : undefined}}>
+                          {gN(m.a)?.flag} {gN(m.a)?.name}
+                        </span>
+                        <span className="vs"> vs </span>
+                        <span style={{color: res ? (resA === 'B' ? 'var(--gold)' : resA !== 'draw' ? 'var(--mu)' : undefined) : undefined}}>
+                          {gN(m.b)?.flag} {gN(m.b)?.name}
+                        </span>
+                      </div>
+                      {res ? (
+                        <div className="mscore">{sA}–{sB}{res.penWinner ? ' P' : res.etRes ? ' AET' : ''}</div>
+                      ) : m.venue ? (
+                        <div className="mtime" style={{fontSize: 9, color: 'var(--di)'}}>{m.venue}</div>
+                      ) : null}
+                      <div className={`mbadge ${isPast ? 'done' : isCur ? 'soon' : ''}`}>
+                        {isPast ? 'FT' : isCur ? 'Prochain' : 'À venir'}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            ))
-          ))}
+            );
+          })}
         </div>
       </div>
       <div className="sched-r">
-        {koPhases.map(phase=>(
-          <div className="elim-section" key={phase.label}>
-            <div className="es-hdr">{phase.label}</div>
-            {phase.days.map((day,di)=>(
-              <div key={di} className={`ko-match${day.matches.length===0?' tbd':''}`}>
-                <div className="ko-date">{day.label}</div>
-                {day.matches.length>0
-                  ? day.matches.map((m,mi)=>(
-                      <div key={mi} className="ko-teams">
-                        {gN(m.a)?.flag} {gN(m.a)?.name} <span className="ko-vs">vs</span> {gN(m.b)?.flag} {gN(m.b)?.name}
+        <div className="day-hdr">PHASE KO</div>
+        {(['R32','R16','QF','SF','3rd','Final'] as const).map(phase => {
+          const phaseDays = CALENDAR.filter(d => d.phase === phase);
+          if (!phaseDays.length) return null;
+          const phaseLabels: Record<string, string> = {
+            R32: 'HUITIÈMES · R32', R16: 'SEIZIÈMES · R16', QF: 'QUARTS DE FINALE',
+            SF: 'DEMI-FINALES', '3rd': 'TROISIÈME PLACE', Final: '🏆 FINALE',
+          };
+          return (
+            <div className="elim-section" key={phase}>
+              <div className="es-hdr">{phaseLabels[phase]}</div>
+              {phaseDays.map((day, pdi) => {
+                const di = CALENDAR.indexOf(day);
+                const played  = matchResults[di];
+                const isPast  = di < dayIndex;
+                const isCur   = di === dayIndex;
+                const displayMatches = day.matches.length > 0
+                  ? day.matches
+                  : played
+                    ? played.map(r => ({ a: r.a, b: r.b, venue: r.venue }))
+                    : isCur
+                      ? buildMatchesForCurrentDay({ ...state, dayIndex: di } as typeof state)
+                      : [];
+
+                return (
+                  <div key={pdi} className={`ko-match${displayMatches.length === 0 ? ' tbd' : ''}`}>
+                    <div className="ko-date">{day.label}{isCur ? ' ▶' : ''}</div>
+                    {displayMatches.length > 0 ? displayMatches.map((m, mi) => {
+                      const res = played?.find(r => (r.a === m.a && r.b === m.b) || (r.a === m.b && r.b === m.a));
+                      const flipped = res && res.a === m.b;
+                      const sA = flipped ? res!.scoreB : res?.scoreA;
+                      const sB = flipped ? res!.scoreA : res?.scoreB;
+                      const resA = flipped ? (res?.res === 'A' ? 'B' : res?.res === 'B' ? 'A' : 'draw') : res?.res;
+                      return (
+                        <div key={mi} className="ko-teams">
+                          <span style={{color: res ? (resA === 'A' ? 'var(--gold)' : 'var(--mu)') : undefined}}>
+                            {gN(m.a)?.flag} {gN(m.a)?.name}
+                          </span>
+                          {res ? <span className="ko-vs" style={{fontFamily:'JetBrains Mono',fontWeight:700}}>{sA}–{sB}{res.penWinner ? ' P' : res.etRes ? ' AET' : ''}</span>
+                               : <span className="ko-vs">vs</span>}
+                          <span style={{color: res ? (resA === 'B' ? 'var(--gold)' : 'var(--mu)') : undefined}}>
+                            {gN(m.b)?.flag} {gN(m.b)?.name}
+                          </span>
+                        </div>
+                      );
+                    }) : (
+                      <div className="ko-teams">
+                        <span className="tbd-t">À déterminer</span>
+                        <span className="ko-vs">vs</span>
+                        <span className="tbd-t">À déterminer</span>
                       </div>
-                    ))
-                  : <div className="ko-teams"><span className="tbd-t">À déterminer</span><span className="ko-vs">vs</span><span className="tbd-t">À déterminer</span></div>
-                }
-              </div>
-            ))}
-          </div>
-        ))}
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
 // ─── PortfolioView ────────────────────────────────────────────────────────────
-function PortfolioView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
-  const cash      = useGameStore(s=>s.cash);
-  const prices    = useGameStore(s=>s.prices);
-  const portfolio = useGameStore(s=>s.portfolio);
-  const bestScore = useGameStore(s=>s.bestScore);
+function PortfolioView({ onTrade }: { onTrade: (n: Nation, m: TradeMode) => void }) {
+  const cash              = useGameStore(s => s.cash);
+  const prices            = useGameStore(s => s.prices);
+  const portfolio         = useGameStore(s => s.portfolio);
+  const avgCost           = useGameStore(s => s.avgCost);
+  const eliminated        = useGameStore(s => s.eliminated);
+  const txLog             = useGameStore(s => s.txLog);
+  const bestScore         = useGameStore(s => s.bestScore);
+  const liquidateEliminated = useGameStore(s => s.liquidateEliminated);
 
   const holdings = Object.entries(portfolio)
-    .filter(([,q])=>q>0)
-    .map(([id,qty])=>{
-      const n = gN(id);
-      const price = prices[id]??0;
-      const value = price*qty;
-      const cost  = (n?.p??0)*qty;
-      return { id, n, qty, price, value, cost, pl:value-cost };
+    .filter(([, q]) => q > 0)
+    .map(([id, qty]) => {
+      const n       = gN(id);
+      const price   = prices[id] ?? 0;
+      const avg     = avgCost[id] ?? n?.p ?? 0;
+      const value   = price * qty;
+      const invested = avg * qty;
+      const pl      = value - invested;
+      const chPct   = avg > 0 ? pctOf(price, avg) : 0;
+      const isElim  = eliminated.includes(id);
+      return { id, n, qty, price, avg, value, invested, pl, chPct, isElim };
     })
-    .sort((a,b)=>b.value-a.value);
+    .sort((a, b) => b.value - a.value);
 
-  const portVal    = holdings.reduce((a,h)=>a+h.value,0);
-  const totalValue = cash+portVal;
-  const totalPl    = holdings.reduce((a,h)=>a+h.pl,0);
-  const invested   = holdings.reduce((a,h)=>a+h.cost,0);
+  const portVal   = holdings.reduce((a, h) => a + h.value, 0);
+  const invested  = holdings.reduce((a, h) => a + h.invested, 0);
+  const totalValue = cash + portVal;
+  const totalPl   = portVal - invested;
+  const hasElimHeld = holdings.some(h => h.isElim);
 
   return (
     <div className="view-port">
@@ -244,33 +322,74 @@ function PortfolioView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
         <div className="port-hdr">MES POSITIONS</div>
         <div className="port-sum">
           <div className="ps-item"><div className="ps-l">TOTAL</div><div className="ps-v g">{fmt(totalValue)} KC</div></div>
-          <div className="ps-item"><div className="ps-l">P&amp;L</div><div className={`ps-v${totalPl>=0?' gn':' ls'}`}>{totalPl>=0?'+':''}{fmt(totalPl)} KC</div></div>
+          <div className="ps-item"><div className="ps-l">INVESTI</div><div className="ps-v">{fmt(invested)} KC</div></div>
+          <div className="ps-item"><div className="ps-l">P&amp;L</div><div className={`ps-v${totalPl >= 0 ? ' gn' : ' ls'}`}>{totalPl >= 0 ? '+' : ''}{fmt(totalPl)} KC</div></div>
           <div className="ps-item"><div className="ps-l">CASH</div><div className="ps-v">{fmt(cash)} KC</div></div>
         </div>
-        {bestScore!==null&&<div style={{marginBottom:12,padding:'8px 12px',background:'rgba(255,219,0,.06)',border:'1px solid var(--gold-dk)',borderRadius:6,fontSize:10,color:'var(--gold)',fontWeight:700,letterSpacing:1}}>🏆 MEILLEUR SCORE : {fmt(bestScore)} KC</div>}
-        {holdings.length===0
+        {bestScore !== null && (
+          <div style={{marginBottom:12,padding:'8px 12px',background:'rgba(255,219,0,.06)',border:'1px solid var(--gold-dk)',borderRadius:6,fontSize:10,color:'var(--gold)',fontWeight:700,letterSpacing:1}}>
+            🏆 MEILLEUR SCORE : {fmt(bestScore)} KC
+          </div>
+        )}
+        {hasElimHeld && (
+          <button onClick={liquidateEliminated} style={{width:'100%',padding:'8px',background:'rgba(255,60,60,.08)',border:'1px solid var(--loss-dk)',borderRadius:6,color:'var(--loss)',fontSize:11,fontWeight:700,letterSpacing:1,marginBottom:10}}>
+            💀 LIQUIDER LES ÉLIMINÉS · 1 KC/action
+          </button>
+        )}
+        {holdings.length === 0
           ? <div style={{textAlign:'center',padding:40,color:'var(--di)',fontSize:12}}>Aucune position ouverte</div>
-          : holdings.map(h=>(
-              <div key={h.id} className="pos-row" onClick={()=>h.n&&onTrade(h.n,'sell')}>
+          : holdings.map(h => (
+              <div key={h.id} className="pos-row" style={{opacity: h.isElim ? 0.5 : 1}} onClick={() => !h.isElim && h.n && onTrade(h.n, 'sell')}>
                 <div className="pos-flag">{h.n?.flag}</div>
                 <div className="pos-info">
-                  <div className="pos-name">{h.n?.name}</div>
-                  <div className="pos-qty">×{h.qty} · moy. {h.n?.p} KC</div>
+                  <div className="pos-name">
+                    {h.n?.name}
+                    {h.isElim && <span style={{fontSize:9,color:'var(--loss)',marginLeft:5}}>💀</span>}
+                  </div>
+                  <div className="pos-qty">
+                    ×{h.qty} · moy. <span style={{fontFamily:'JetBrains Mono'}}>{fmt(h.avg)}</span>
+                    {' → '}
+                    <span style={{color: h.chPct >= 0 ? 'var(--gain)' : 'var(--loss)', fontFamily:'JetBrains Mono'}}>
+                      {fmt(h.price)} KC
+                    </span>
+                    <span style={{color: h.chPct >= 0 ? 'var(--gain)' : 'var(--loss)'}}>
+                      {' '}{h.chPct >= 0 ? '▲' : '▼'}{Math.abs(h.chPct)}%
+                    </span>
+                  </div>
                 </div>
                 <div className="pos-price">
                   <div className="pos-val">{fmt(h.value)} KC</div>
-                  <div className={`pos-pnl${h.pl>=0?' up':' dn'}`}>{h.pl>=0?'▲ +':'▼ '}{fmt(Math.abs(h.pl))} KC</div>
+                  <div className={`pos-pnl${h.pl >= 0 ? ' up' : ' dn'}`}>{h.pl >= 0 ? '▲ +' : '▼ '}{fmt(Math.abs(h.pl))} KC</div>
                 </div>
               </div>
             ))
         }
+
+        {/* Tx log */}
+        {txLog.length > 0 && (
+          <div style={{marginTop: 16, borderTop: '1px solid var(--bd)', paddingTop: 12}}>
+            <div style={{fontSize:8,letterSpacing:2,color:'var(--di)',fontWeight:700,marginBottom:8}}>HISTORIQUE DES TRANSACTIONS</div>
+            {txLog.slice(0, 15).map((tx, i) => (
+              <div key={i} style={{display:'grid',gridTemplateColumns:'28px 18px 1fr 22px auto 20px',gap:4,alignItems:'center',padding:'4px 0',borderBottom:'1px solid rgba(255,255,255,.04)',fontSize:10}}>
+                <span style={{fontSize:8,fontWeight:700,padding:'2px 4px',borderRadius:3,textAlign:'center',background:tx.dir==='buy'?'rgba(0,255,135,.12)':'rgba(255,60,60,.12)',color:tx.dir==='buy'?'var(--gain)':'var(--loss)'}}>
+                  {tx.dir === 'buy' ? 'ACH' : 'VTE'}
+                </span>
+                <span style={{fontSize:13,textAlign:'center'}}>{tx.flag}</span>
+                <span style={{fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tx.name}</span>
+                <span style={{color:'var(--di)',textAlign:'right',fontFamily:'JetBrains Mono',fontSize:9}}>×{tx.qty}</span>
+                <span style={{fontFamily:'JetBrains Mono',fontWeight:600,textAlign:'right'}}>{fmt(tx.price)} KC</span>
+                <span style={{color:'var(--di)',fontSize:8,textAlign:'right',fontFamily:'JetBrains Mono'}}>J{tx.day + 1}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="port-r">
         <div className="port-hdr">MARCHÉ · VOS NATIONS</div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:7}}>
-          {holdings.map(h=>h.n&&<StockTile key={h.id} nation={h.n} onBuy={()=>h.n&&onTrade(h.n,'buy')} onSell={()=>h.n&&onTrade(h.n,'sell')}/>)}
+          {holdings.map(h => h.n && <StockTile key={h.id} nation={h.n} onBuy={() => h.n && onTrade(h.n, 'buy')} onSell={() => h.n && onTrade(h.n, 'sell')}/>)}
         </div>
-        {holdings.length===0&&<div style={{textAlign:'center',padding:60,color:'var(--di)',fontSize:12}}>Achetez des actions dans la vue MARKET</div>}
+        {holdings.length === 0 && <div style={{textAlign:'center',padding:60,color:'var(--di)',fontSize:12}}>Achetez des actions dans la vue MARKET</div>}
       </div>
     </div>
   );
@@ -278,107 +397,198 @@ function PortfolioView({ onTrade }: { onTrade:(n:Nation,m:TradeMode)=>void }) {
 
 // ─── StandingsView ────────────────────────────────────────────────────────────
 function StandingsView() {
-  const prices    = useGameStore(s=>s.prices);
-  const eliminated = useGameStore(s=>s.eliminated);
-  const dayIndex  = useGameStore(s=>s.dayIndex);
-  const groupsPhase = dayIndex <= 17;
+  const prices       = useGameStore(s => s.prices);
+  const eliminated   = useGameStore(s => s.eliminated);
+  const matchResults = useGameStore(s => s.matchResults);
+  const dayIndex     = useGameStore(s => s.dayIndex);
+  const r32Pool      = useGameStore(s => s.r32Pool);
+  const portfolio    = useGameStore(s => s.portfolio);
 
-  const groupLetters = ['A','B','C','D','E','F','G','H','I','J','K','L'];
+  const standings = useMemo(
+    () => buildGroupStandingsUI(matchResults, prices, eliminated),
+    [matchResults, prices, eliminated],
+  );
+
+  const isKO = dayIndex > 17 || !CALENDAR[dayIndex] || CALENDAR[dayIndex]?.phase !== 'Groups';
+
+  const koResults = useMemo(() => {
+    const r: Record<string, StoredMatchResult[]> = { R32: [], R16: [], QF: [], SF: [], Final: [] };
+    for (const [diStr, res] of Object.entries(matchResults)) {
+      const day = CALENDAR[Number(diStr)];
+      if (!day?.isKO) continue;
+      const key = day.phase as string;
+      if (r[key]) r[key] = [...r[key], ...res];
+    }
+    return r;
+  }, [matchResults]);
+
+  const champion = useGameStore(s => s.champion);
 
   return (
     <div className="std-wrap">
-      {groupsPhase ? (
-        <div className="std-grid">
-          {groupLetters.map(g=>{
-            const nations = NATIONS.filter(n=>n.group===g)
-              .sort((a,b)=>(prices[b.id]??b.p)-(prices[a.id]??a.p));
+      {/* KO results */}
+      {isKO && (
+        <div style={{marginBottom: 20}}>
+          {champion && (
+            <div style={{background:'rgba(255,219,0,.06)',border:'1px solid var(--gold-dk)',borderRadius:10,padding:'16px',marginBottom:12,textAlign:'center'}}>
+              <div style={{fontSize:48}}>{gN(champion)?.flag}</div>
+              <div style={{fontFamily:'Bebas Neue',fontSize:22,letterSpacing:4,color:'var(--gold)'}}>{gN(champion)?.name} — CHAMPION 🏆</div>
+            </div>
+          )}
+          {(['R32','R16','QF','SF','Final'] as const).map(phase => {
+            const res = koResults[phase];
+            if (!res?.length) return null;
+            const labels: Record<string,string> = { R32:'HUITIÈMES · R32', R16:'SEIZIÈMES · R16', QF:'QUARTS DE FINALE', SF:'DEMI-FINALES', Final:'🏆 FINALE' };
             return (
-              <div className="grp-card" key={g}>
-                <div className="grp-hdr">GROUPE {g}</div>
-                <table className="grp-table">
-                  <thead><tr>
-                    <th>Équipe</th><th className="mono">Prix KC</th><th className="mono">Var%</th>
-                  </tr></thead>
-                  <tbody>
-                    {nations.map((n,i)=>{
-                      const price = prices[n.id]??n.p;
-                      const pct   = ((price-n.p)/n.p*100).toFixed(1);
-                      const up    = price>=n.p;
-                      const isEl  = eliminated.includes(n.id);
-                      return (
-                        <tr key={n.id} className={i<2&&!isEl?'q':''} style={isEl?{opacity:0.4}:{}}>
-                          <td><div className="nm"><span className="fl">{n.flag}</span>{n.name}</div></td>
-                          <td className="mono">{Math.round(price)}</td>
-                          <td className={`mono ${up?'gn':'ls'}`}>{up?'+':''}{pct}%</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div key={phase} style={{marginBottom:12}}>
+                <div style={{fontFamily:'Bebas Neue',fontSize:15,letterSpacing:3,color:'var(--gold)',marginBottom:6}}>{labels[phase]}</div>
+                <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))',gap:6}}>
+                  {res.map((r, i) => {
+                    const nA = gN(r.a), nB = gN(r.b);
+                    return (
+                      <div key={i} style={{background:'var(--s2)',border:'1px solid var(--bd)',borderRadius:7,padding:'8px 12px'}}>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,color:r.res==='A'?'var(--gold)':'var(--mu)'}}>
+                          <span>{nA?.flag} {nA?.name}</span>
+                          <span style={{fontFamily:'JetBrains Mono'}}>{r.scoreA}</span>
+                        </div>
+                        <div style={{display:'flex',justifyContent:'space-between',fontSize:12,fontWeight:700,color:r.res==='B'?'var(--gold)':'var(--mu)'}}>
+                          <span>{nB?.flag} {nB?.name}</span>
+                          <span style={{fontFamily:'JetBrains Mono'}}>{r.scoreB}</span>
+                        </div>
+                        {r.penWinner && <div style={{fontSize:8,color:'var(--mu)',marginTop:2}}>Pens {r.penA}–{r.penB}</div>}
+                        {r.etRes && !r.penWinner && <div style={{fontSize:8,color:'var(--gold)',marginTop:2}}>⚡ AET</div>}
+                        {r.isUpset && <div style={{fontSize:8,color:'var(--upset)',marginTop:2}}>🚀 UPSET!</div>}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             );
           })}
-        </div>
-      ) : (
-        <div>
-          <div style={{fontFamily:'Bebas Neue',fontSize:16,letterSpacing:3,color:'var(--mu)',marginBottom:12}}>ÉQUIPES ENCORE EN COMPÉTITION</div>
-          <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:8}}>
-            {NATIONS.filter(n=>!eliminated.includes(n.id)).map(n=>{
-              const price = prices[n.id]??n.p;
-              const pct   = ((price-n.p)/n.p*100).toFixed(1);
-              const up    = price>=n.p;
-              return (
-                <div key={n.id} style={{background:'var(--s1)',border:'1px solid var(--bd)',borderRadius:8,padding:'10px 12px'}}>
-                  <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
-                    <span style={{fontSize:20}}>{n.flag}</span>
-                    <span style={{fontWeight:700,fontSize:12}}>{n.name}</span>
-                  </div>
-                  <div style={{fontFamily:'JetBrains Mono',fontSize:16,fontWeight:700}}>{Math.round(price)} KC</div>
-                  <div style={{fontFamily:'JetBrains Mono',fontSize:10,color:up?'var(--gain)':'var(--loss)'}}>{up?'▲+':'▼'}{pct}%</div>
-                </div>
-              );
-            })}
-          </div>
+          <div style={{borderTop:'1px solid var(--bd)',margin:'16px 0'}}/>
         </div>
       )}
+
+      {/* Group standings */}
+      <div style={{fontFamily:'Bebas Neue',fontSize:14,letterSpacing:3,color:'var(--mu)',marginBottom:10}}>CLASSEMENTS DE GROUPE</div>
+      <div className="std-grid">
+        {Object.entries(standings).map(([g, teams]) => (
+          <div className="grp-card" key={g}>
+            <div className="grp-hdr">GROUPE {g}</div>
+            <table className="grp-table">
+              <thead><tr>
+                <th>Équipe</th>
+                <th className="mono" title="Victoires">V</th>
+                <th className="mono" title="Nuls">N</th>
+                <th className="mono" title="Défaites">D</th>
+                <th className="mono" title="Points">Pts</th>
+                <th className="mono">Prix KC</th>
+              </tr></thead>
+              <tbody>
+                {teams.map((t, i) => {
+                  const ch    = pctOf(t.price, t.initP);
+                  const up    = ch >= 0;
+                  const isQ   = i < 2 || r32Pool.includes(t.id);
+                  const held  = (portfolio[t.id] ?? 0) > 0;
+                  return (
+                    <tr key={t.id} className={isQ && !t.elim ? 'q' : ''} style={t.elim ? {opacity:0.4} : {}}>
+                      <td>
+                        <div className="nm">
+                          <span className="fl">{t.flag}</span>
+                          {t.name}
+                          {held && !t.elim && <span style={{fontSize:8,color:'var(--gain)',marginLeft:4}}>●</span>}
+                        </div>
+                      </td>
+                      <td className="mono" style={{color:'var(--gain)',textAlign:'center'}}>{t.w}</td>
+                      <td className="mono" style={{color:'var(--mu)',textAlign:'center'}}>{t.d}</td>
+                      <td className="mono" style={{color:'var(--loss)',textAlign:'center'}}>{t.l}</td>
+                      <td className="mono" style={{color:'var(--gold)',fontWeight:700,textAlign:'center'}}>{t.pts}</td>
+                      <td className="mono" style={{textAlign:'right'}}>
+                        {Math.round(t.price)}{' '}
+                        <span style={{color: up ? 'var(--gain)' : 'var(--loss)', fontSize:9}}>{up ? '▲+' : '▼'}{Math.abs(ch)}%</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // ─── BracketView ──────────────────────────────────────────────────────────────
 function BracketView() {
+  const matchResults = useGameStore(s => s.matchResults);
+  const dayIndex     = useGameStore(s => s.dayIndex);
+  const state        = useGameStore(s => s);
+
   const phases = [
-    { label:'HUITIÈMES DE FINALE · R32', key:'R32' },
-    { label:'QUARTS DE FINALE', key:'QF' },
-    { label:'DEMI-FINALES', key:'SF' },
-    { label:'TROISIÈME PLACE', key:'3rd' },
-    { label:'🏆 FINALE', key:'Final' },
-  ];
+    { label: 'HUITIÈMES DE FINALE · R32', key: 'R32' },
+    { label: 'QUARTS DE FINALE',          key: 'QF'  },
+    { label: 'DEMI-FINALES',              key: 'SF'  },
+    { label: 'TROISIÈME PLACE',           key: '3rd' },
+    { label: '🏆 FINALE',                 key: 'Final' },
+  ] as const;
 
   return (
     <div className="bkt-wrap">
-      {phases.map(phase=>{
-        const days = CALENDAR.filter(d=>d.phase===phase.key);
-        const isFinal = phase.key==='Final';
+      {phases.map(phase => {
+        const days = CALENDAR.filter(d => d.phase === phase.key);
+        const isFinal = phase.key === 'Final';
         return (
           <div className="bkt-stage" key={phase.key}>
             <div className="bkt-stage-ttl">{phase.label}</div>
             <div className="bkt-row">
-              {days.map((day,di)=>(
-                day.matches.length>0
-                  ? day.matches.map((m,mi)=>(
-                      <div key={`${di}-${mi}`} className="bkt-m" style={isFinal?{background:'rgba(255,219,0,.03)',borderColor:'rgba(255,219,0,.35)'}:{}}>
-                        <div className="bkt-meta">{day.label}</div>
-                        <div className="bkt-t">{gN(m.a)?.flag} {gN(m.a)?.name}</div>
-                        <div className="bkt-t">{gN(m.b)?.flag} {gN(m.b)?.name}</div>
-                      </div>
-                    ))
-                  : <div key={di} className="bkt-m upcoming">
-                      <div className="bkt-meta">{day.label}</div>
+              {days.map((day, pdi) => {
+                const di = CALENDAR.indexOf(day);
+                const played = matchResults[di];
+                const isCur  = di === dayIndex;
+                const displayMatches = day.matches.length > 0
+                  ? day.matches
+                  : played
+                    ? played.map(r => ({ a: r.a, b: r.b }))
+                    : isCur
+                      ? buildMatchesForCurrentDay({ ...state, dayIndex: di } as typeof state)
+                      : [];
+
+                if (displayMatches.length === 0) {
+                  return (
+                    <div key={pdi} className="bkt-m upcoming" style={isFinal ? {background:'rgba(255,219,0,.03)',borderColor:'rgba(255,219,0,.35)'} : {}}>
+                      <div className="bkt-meta">{day.label}{isCur ? ' ▶' : ''}</div>
                       <div className="bkt-t"><span className="tbd">À déterminer</span></div>
                       <div className="bkt-t"><span className="tbd">À déterminer</span></div>
                     </div>
-              ))}
+                  );
+                }
+
+                return displayMatches.map((m, mi) => {
+                  const res = played?.find(r => (r.a === m.a && r.b === m.b) || (r.a === m.b && r.b === m.a));
+                  const flipped = res && res.a === m.b;
+                  const sA = flipped ? res!.scoreB : res?.scoreA;
+                  const sB = flipped ? res!.scoreA : res?.scoreB;
+                  const resA = flipped ? (res?.res === 'A' ? 'B' : res?.res === 'B' ? 'A' : 'draw') : res?.res;
+                  return (
+                    <div key={`${pdi}-${mi}`} className={`bkt-m${!played ? ' upcoming' : ''}`}
+                      style={isFinal ? {background:'rgba(255,219,0,.03)',borderColor:'rgba(255,219,0,.35)'} : {}}>
+                      <div className="bkt-meta">{day.label}</div>
+                      <div className="bkt-t" style={{color: res ? (resA === 'A' ? 'var(--gold)' : 'var(--mu)') : undefined}}>
+                        {gN(m.a)?.flag} {gN(m.a)?.name}
+                        {res && <span style={{fontFamily:'JetBrains Mono',marginLeft:6,fontSize:14,fontWeight:700}}>{sA}</span>}
+                      </div>
+                      <div className="bkt-t" style={{color: res ? (resA === 'B' ? 'var(--gold)' : 'var(--mu)') : undefined}}>
+                        {gN(m.b)?.flag} {gN(m.b)?.name}
+                        {res && <span style={{fontFamily:'JetBrains Mono',marginLeft:6,fontSize:14,fontWeight:700}}>{sB}</span>}
+                      </div>
+                      {res?.penWinner && <div style={{fontSize:8,color:'var(--mu)',marginTop:2}}>Pens {res.penA}–{res.penB}</div>}
+                      {res?.etRes && !res.penWinner && <div style={{fontSize:8,color:'var(--gold)',marginTop:2}}>AET</div>}
+                      {res?.isUpset && <div style={{fontSize:8,color:'var(--upset)',marginTop:2}}>🚀 UPSET</div>}
+                    </div>
+                  );
+                });
+              })}
             </div>
           </div>
         );
@@ -389,20 +599,20 @@ function BracketView() {
 
 // ─── RankingView ──────────────────────────────────────────────────────────────
 function RankingView() {
-  const cash      = useGameStore(s=>s.cash);
-  const prices    = useGameStore(s=>s.prices);
-  const portfolio = useGameStore(s=>s.portfolio);
+  const cash      = useGameStore(s => s.cash);
+  const prices    = useGameStore(s => s.prices);
+  const portfolio = useGameStore(s => s.portfolio);
 
-  const portVal   = Object.entries(portfolio).reduce((a,[id,q])=>a+q*(prices[id]??0),0);
-  const myTotal   = cash+portVal;
+  const portVal  = Object.entries(portfolio).reduce((a, [id, q]) => a + q * (prices[id] ?? 0), 0);
+  const myTotal  = cash + portVal;
 
   const mockRanking = [
-    { name:'GoldenBoot', country:'🇫🇷', positions:12, total:18420 },
-    { name:'MarketKing', country:'🇪🇸', positions:9,  total:16300 },
-    { name:'Toi',        country:'🌍', positions:Object.values(portfolio).filter(q=>q>0).length, total:myTotal, isMe:true },
-    { name:'Klopp_Fan',  country:'🇩🇪', positions:7,  total:13200 },
-    { name:'Messi_Out',  country:'🇦🇷', positions:5,  total:11800 },
-  ].sort((a,b)=>b.total-a.total);
+    { name: 'GoldenBoot', country: '🇫🇷', positions: 12, total: 18420 },
+    { name: 'MarketKing', country: '🇪🇸', positions: 9,  total: 16300 },
+    { name: 'Toi',        country: '🌍',  positions: Object.values(portfolio).filter(q => q > 0).length, total: myTotal, isMe: true },
+    { name: 'Klopp_Fan',  country: '🇩🇪', positions: 7,  total: 13200 },
+    { name: 'Messi_Out',  country: '🇦🇷', positions: 5,  total: 11800 },
+  ].sort((a, b) => b.total - a.total);
 
   return (
     <div className="rnk-wrap">
@@ -412,9 +622,9 @@ function RankingView() {
         <button className="rtab" style={{opacity:.5,cursor:'not-allowed'}} title="Phase 3">FRIENDS</button>
       </div>
       <div className="rnk-list">
-        {mockRanking.map((p,i)=>(
-          <div key={p.name} className={`rnk-row${p.isMe?' me':''}`}>
-            <div className={`rnk-rank${i<3?' top':''}`}>{i+1}</div>
+        {mockRanking.map((p, i) => (
+          <div key={p.name} className={`rnk-row${p.isMe ? ' me' : ''}`}>
+            <div className={`rnk-rank${i < 3 ? ' top' : ''}`}>{i+1}</div>
             <div className="rnk-av">{p.name[0]}</div>
             <div className="rnk-info">
               <div className="rnk-name">{p.name}</div>
@@ -428,62 +638,38 @@ function RankingView() {
   );
 }
 
-// ─── SimulatePanel ────────────────────────────────────────────────────────────
-function SimulatePanel({ onClose }: { onClose:(r:SimResult)=>void }) {
-  const dayIndex   = useGameStore(s=>s.dayIndex);
-  const advanceDay = useGameStore(s=>s.advanceDay);
-  const [loading, setLoading] = useState(false);
-  const day = CALENDAR[dayIndex];
-
-  function play() {
-    setLoading(true);
-    setTimeout(()=>{
-      const res = advanceDay();
-      setLoading(false);
-      if (res) onClose(res as SimResult);
-    }, 400);
-  }
-
-  if (!day) return <div className="sim-panel"><div style={{color:'var(--gold)',fontFamily:'Bebas Neue',fontSize:22,letterSpacing:3}}>🏆 TOURNOI TERMINÉ</div></div>;
-  return (
-    <div className="sim-panel">
-      <div className="sim-day">{day.label}</div>
-      <div className="sim-phase">{day.phase}</div>
-      <div className="sim-matches">{day.matches.length>0?`${day.matches.length} match${day.matches.length>1?'s':''}`:day.isKO?'Phase KO':'En attente'}</div>
-      <button className="sim-btn" onClick={play} disabled={loading}>
-        {loading?'⏳ SIMULATION…':'⚡ SIMULER CE JOUR'}
-      </button>
-    </div>
-  );
-}
-
 // ─── ResultOverlay ────────────────────────────────────────────────────────────
-function ResultOverlay({ result, onClose }: { result:SimResult; onClose:()=>void }) {
+function ResultOverlay({ results, onClose }: { results: StoredMatchResult[]; onClose: () => void }) {
+  const divResults = results.filter(r => r.divCash > 0);
   return (
     <div className="res-overlay" onClick={onClose}>
-      <div className="res-box" onClick={e=>e.stopPropagation()}>
+      <div className="res-box" onClick={e => e.stopPropagation()}>
         <div className="res-title">RÉSULTATS</div>
         <div className="res-matches">
-          {result.results.map(r=>{
-            const nA=gN(r.teamA), nB=gN(r.teamB);
+          {results.map((r, i) => {
+            const nA = gN(r.a), nB = gN(r.b);
             return (
-              <div key={r.matchId} className={`res-match${r.isUpset?' upset':''}`}>
-                <span>{nA?.flag} {nA?.name}</span>
-                <span className="res-score">{r.scoreA} — {r.scoreB}</span>
-                <span>{nB?.flag} {nB?.name}</span>
-                {r.elimId&&<span className="res-elim">💀 {gN(r.elimId)?.name} éliminé</span>}
-                {r.isUpset&&<span className="res-upbadge">⚡ UPSET!</span>}
+              <div key={i} className={`res-match${r.isUpset ? ' upset' : ''}`}>
+                <span style={{color: r.res === 'A' ? 'var(--gold)' : 'var(--mu)'}}>{nA?.flag} {nA?.name}</span>
+                <span className="res-score">
+                  {r.scoreA}–{r.scoreB}
+                  {r.penWinner && <span style={{fontSize:10,color:'var(--mu)'}}> ({r.penA}–{r.penB} P)</span>}
+                  {r.etRes && !r.penWinner && <span style={{fontSize:10,color:'var(--gold)'}}> AET</span>}
+                </span>
+                <span style={{color: r.res === 'B' ? 'var(--gold)' : 'var(--mu)'}}>{nB?.flag} {nB?.name}</span>
+                {r.elimId && <span className="res-elim">💀 {gN(r.elimId)?.name} éliminé</span>}
+                {r.isUpset && <span className="res-upbadge">🚀 UPSET!</span>}
               </div>
             );
           })}
         </div>
-        {result.dividends.length>0&&(
+        {divResults.length > 0 && (
           <div className="res-divs">
-            <div className="res-divtitle">💰 DIVIDENDES REÇUS</div>
-            {result.dividends.map(d=>(
-              <div key={d.nationId} className="res-divrow">
-                <span>{gN(d.nationId)?.flag} {gN(d.nationId)?.name}</span>
-                <span className="res-divamt">+{fmt(d.amount)} KC</span>
+            <div className="res-divtitle">🎁 DIVIDENDES REÇUS</div>
+            {divResults.map((r, i) => (
+              <div key={i} className="res-divrow">
+                <span>{gN(r.winnerId ?? r.a)?.flag} {gN(r.winnerId ?? r.a)?.name}</span>
+                <span className="res-divamt">+{fmt(r.divCash)} KC</span>
               </div>
             ))}
           </div>
@@ -496,27 +682,27 @@ function ResultOverlay({ result, onClose }: { result:SimResult; onClose:()=>void
 
 // ─── TutorialOverlay ──────────────────────────────────────────────────────────
 const TUT_STEPS = [
-  { title:'Bienvenue sur KickStock !', text:'Investissez dans les équipes nationales comme des actions. Plus une équipe performe, plus son prix monte.', icon:'⚽' },
-  { title:'Mouvements de prix', text:'Un résultat positif augmente le prix. Une défaite le fait chuter. Le gagnant absorbe 50% de la valeur du perdant.', icon:'📈' },
-  { title:'Dividendes & Taxes', text:'Quand votre équipe se qualifie (R32, R16, QF, SF, Finale, Champion), vous recevez des dividendes en KC. Chaque trade est taxé (10% groupes, 5% KO).', icon:'💰' },
-  { title:'Lock-up marché', text:"Le marché est gelé 15 min avant et 30 min après chaque match. Planifiez vos trades à l'avance !", icon:'🔒' },
+  { title: 'Bienvenue sur KickStock !', text: 'Investissez dans les équipes nationales comme des actions. Plus une équipe performe, plus son prix monte.', icon: '⚽' },
+  { title: 'Mouvements de prix', text: "Un résultat positif augmente le prix. Une défaite le fait chuter. Le gagnant absorbe 50% de la valeur du perdant.", icon: '📈' },
+  { title: 'Dividendes & Taxes', text: "Quand votre équipe se qualifie (R32, R16, QF, SF, Finale, Champion), vous recevez des dividendes en KC. La taxe (10% groupes, 5% KO) s'applique uniquement à la vente.", icon: '💰' },
+  { title: 'Lock-up marché', text: "Le marché est gelé 15 min avant et 30 min après chaque match. Planifiez vos trades à l'avance !", icon: '🔒' },
 ];
 
-function TutorialOverlay({ onClose }: { onClose:()=>void }) {
+function TutorialOverlay({ onClose }: { onClose: () => void }) {
   const [step, setStep] = useState(0);
   const s = TUT_STEPS[step];
   return (
     <div className="tut-overlay" onClick={onClose}>
-      <div className="tut-box" onClick={e=>e.stopPropagation()}>
+      <div className="tut-box" onClick={e => e.stopPropagation()}>
         <button className="tut-x" onClick={onClose}>✕</button>
         <div className="tut-icon">{s.icon}</div>
         <div className="tut-title">{s.title}</div>
         <div className="tut-text">{s.text}</div>
-        <div className="tut-dots">{TUT_STEPS.map((_,i)=><div key={i} className={`tut-dot${i===step?' on':''}`}/>)}</div>
+        <div className="tut-dots">{TUT_STEPS.map((_, i) => <div key={i} className={`tut-dot${i === step ? ' on' : ''}`}/>)}</div>
         <div className="tut-btns">
-          {step>0&&<button className="tut-btn sec" onClick={()=>setStep(s=>s-1)}>← RETOUR</button>}
-          {step<TUT_STEPS.length-1
-            ? <button className="tut-btn pri" onClick={()=>setStep(s=>s+1)}>SUIVANT →</button>
+          {step > 0 && <button className="tut-btn sec" onClick={() => setStep(s => s-1)}>← RETOUR</button>}
+          {step < TUT_STEPS.length - 1
+            ? <button className="tut-btn pri" onClick={() => setStep(s => s+1)}>SUIVANT →</button>
             : <button className="tut-btn pri" onClick={onClose}>COMMENCER ✓</button>
           }
         </div>
@@ -526,37 +712,41 @@ function TutorialOverlay({ onClose }: { onClose:()=>void }) {
 }
 
 // ─── Main BrowserShell ────────────────────────────────────────────────────────
+type ViewId = 'home' | 'schedule' | 'market' | 'portfolio' | 'standings' | 'bracket' | 'ranking';
+
 export default function BrowserShell() {
-  const [view, setView]   = useState<ViewId>('home');
-  const [modal, setModal] = useState<{nation:Nation;mode:TradeMode}|null>(null);
-  const [simResult, setSimResult] = useState<SimResult|null>(null);
-  const [showTut, setShowTut]     = useState(false);
+  const [view, setView]     = useState<ViewId>('home');
+  const [modal, setModal]   = useState<{nation: Nation; mode: TradeMode} | null>(null);
+  const [simResults, setSimResults] = useState<StoredMatchResult[] | null>(null);
+  const [showTut, setShowTut] = useState(false);
 
-  useEffect(()=>{ useGameStore.persist.rehydrate(); }, []);
+  useEffect(() => { useGameStore.persist.rehydrate(); }, []);
 
-  const cash      = useGameStore(s=>s.cash);
-  const prices    = useGameStore(s=>s.prices);
-  const portfolio = useGameStore(s=>s.portfolio);
-  const dayIndex  = useGameStore(s=>s.dayIndex);
-  const resetGame = useGameStore(s=>s.resetGame);
-  const champion  = useGameStore(s=>s.champion);
+  const cash      = useGameStore(s => s.cash);
+  const prices    = useGameStore(s => s.prices);
+  const portfolio = useGameStore(s => s.portfolio);
+  const avgCost   = useGameStore(s => s.avgCost);
+  const dayIndex  = useGameStore(s => s.dayIndex);
+  const resetGame = useGameStore(s => s.resetGame);
+  const champion  = useGameStore(s => s.champion);
 
-  const portVal   = Object.entries(portfolio).reduce((a,[id,q])=>a+q*(prices[id]??0),0);
-  const totVal    = cash+portVal;
-  const pl        = totVal-10000;
-  const positions = Object.values(portfolio).filter(q=>q>0).length;
+  const portVal   = Object.entries(portfolio).reduce((a, [id, q]) => a + q * (prices[id] ?? 0), 0);
+  const invested  = Object.entries(portfolio).reduce((a, [id, q]) => a + q * (avgCost[id] ?? 0), 0);
+  const totVal    = cash + portVal;
+  const pl        = portVal - invested;
+  const positions = Object.values(portfolio).filter(q => q > 0).length;
   const day       = CALENDAR[dayIndex];
 
-  const SIDEBAR_MAIN = [
-    { id:'home'      as ViewId, icon:'🏠', label:'HOME'    },
-    { id:'schedule'  as ViewId, icon:'📅', label:'SCHED.'  },
-    { id:'market'    as ViewId, icon:'📊', label:'MARKET'  },
-    { id:'portfolio' as ViewId, icon:'💼', label:'PORTF.'  },
-    { id:'standings' as ViewId, icon:'🏆', label:'STAND.'  },
-    { id:'bracket'   as ViewId, icon:'🎯', label:'BRACKET' },
+  const SIDEBAR_MAIN: { id: ViewId; icon: string; label: string }[] = [
+    { id: 'home',       icon: '🏠', label: 'HOME'    },
+    { id: 'schedule',   icon: '📅', label: 'SCHED.'  },
+    { id: 'market',     icon: '📊', label: 'MARKET'  },
+    { id: 'portfolio',  icon: '💼', label: 'PORTF.'  },
+    { id: 'standings',  icon: '🏆', label: 'STAND.'  },
+    { id: 'bracket',    icon: '🎯', label: 'BRACKET' },
   ];
 
-  function doTrade(n:Nation, m:TradeMode) { setModal({nation:n,mode:m}); }
+  function doTrade(n: Nation, m: TradeMode) { setModal({nation: n, mode: m}); }
 
   return (
     <div className="ks-browser">
@@ -564,18 +754,18 @@ export default function BrowserShell() {
       <nav className="sb">
         <div className="sb-logo"><span style={{fontSize:18}}>⚽</span><span className="sb-logotxt">KS</span></div>
         <div className="sb-nav">
-          {SIDEBAR_MAIN.map(item=>(
-            <button key={item.id} className={`ni${view===item.id?' on':''}`} onClick={()=>setView(item.id)}>
+          {SIDEBAR_MAIN.map(item => (
+            <button key={item.id} className={`ni${view === item.id ? ' on' : ''}`} onClick={() => setView(item.id)}>
               <span style={{fontSize:18}}>{item.icon}</span>
               <span>{item.label}</span>
             </button>
           ))}
         </div>
         <div className="sb-bot">
-          <button className={`ni-sm${view==='ranking'?' on':''}`} onClick={()=>setView('ranking')}>
+          <button className={`ni-sm${view === 'ranking' ? ' on' : ''}`} onClick={() => setView('ranking')}>
             <span style={{fontSize:16}}>🥇</span><span>RANK.</span>
           </button>
-          <button className="ni-sm" onClick={()=>setShowTut(true)}>
+          <button className="ni-sm" onClick={() => setShowTut(true)}>
             <span style={{fontSize:16}}>❓</span><span>HELP</span>
           </button>
           <div className="av-btn" title="Mon profil">JR</div>
@@ -589,46 +779,53 @@ export default function BrowserShell() {
           <div className="tb-title">{view.toUpperCase()}</div>
           <div className="tb-stats">
             <div className="tbs"><div className="tbs-l">Portefeuille</div><div className="tbs-v g">{fmt(totVal)} KC</div></div>
-            <div className="tbs"><div className="tbs-l">P&amp;L</div><div className={`tbs-v ${pl>=0?'gn':'ls'}`}>{pl>=0?'▲ +':'▼ '}{fmt(Math.abs(pl))}</div></div>
+            <div className="tbs"><div className="tbs-l">P&amp;L</div><div className={`tbs-v ${pl >= 0 ? 'gn' : 'ls'}`}>{pl >= 0 ? '▲ +' : '▼ '}{fmt(Math.abs(pl))}</div></div>
             <div className="tbs"><div className="tbs-l">Positions</div><div className="tbs-v">{positions}</div></div>
             <div className="tbs"><div className="tbs-l">Journée</div><div className="tbs-v">J·{dayIndex+1}</div></div>
           </div>
           <div className="tb-r">
-            {champion&&<div style={{fontFamily:'Bebas Neue',fontSize:13,letterSpacing:2,color:'var(--gold)',background:'rgba(255,219,0,.1)',border:'1px solid var(--gold-dk)',padding:'4px 10px',borderRadius:5}}>🏆 {gN(champion)?.flag} {gN(champion)?.name}</div>}
-            <button className="sim-inline-btn" onClick={()=>{ const r=useGameStore.getState().advanceDay(); if(r) setSimResult(r as SimResult); }}>
-              {day?`⚡ ${day.label}`:'🔄 NOUVEAU JEU'}
+            {champion && (
+              <div style={{fontFamily:'Bebas Neue',fontSize:13,letterSpacing:2,color:'var(--gold)',background:'rgba(255,219,0,.1)',border:'1px solid var(--gold-dk)',padding:'4px 10px',borderRadius:5}}>
+                🏆 {gN(champion)?.flag} {gN(champion)?.name}
+              </div>
+            )}
+            <button className="sim-inline-btn" onClick={() => {
+              const r = useGameStore.getState().advanceDay();
+              if (r) { setSimResults(r.results); setView('market'); }
+            }}>
+              {day ? `⚡ ${day.label}` : '🔄 NOUVEAU JEU'}
             </button>
-            {!day&&<button className="reset-btn" onClick={resetGame}>🔄 RESET</button>}
+            {!day && <button className="reset-btn" onClick={resetGame}>🔄 RESET</button>}
           </div>
         </header>
 
         {/* TICKER */}
         <div className="ticker-wrap">
           <div className="ticker-t">
-            {[...NATIONS,...NATIONS].map((n,i)=>{
-              const p=prices[n.id]??n.p; const up=p>=n.p;
-              const pct=((p-n.p)/n.p*100).toFixed(1);
-              return <span key={i} className="ti">{n.flag} {n.id} <span className={up?'up':'dn'}>{Math.round(p)} {up?'▲+':'▼'}{Math.abs(Number(pct))}%</span></span>;
+            {[...NATIONS, ...NATIONS].map((n, i) => {
+              const p = prices[n.id] ?? n.p; const up = p >= n.p;
+              const pct = ((p - n.p) / n.p * 100).toFixed(1);
+              return <span key={i} className="ti">{n.flag} {n.id} <span className={up ? 'up' : 'dn'}>{Math.round(p)} {up ? '▲+' : '▼'}{Math.abs(Number(pct))}%</span></span>;
             })}
           </div>
         </div>
 
         {/* CONTENT */}
         <div className="ks-content">
-          {view==='home'      && <HomeView      onTrade={doTrade}/>}
-          {view==='schedule'  && <ScheduleView  />}
-          {view==='market'    && <MarketView    onTrade={doTrade}/>}
-          {view==='portfolio' && <PortfolioView onTrade={doTrade}/>}
-          {view==='standings' && <StandingsView />}
-          {view==='bracket'   && <BracketView   />}
-          {view==='ranking'   && <RankingView   />}
+          {view === 'home'      && <HomeView      onTrade={doTrade}/>}
+          {view === 'schedule'  && <ScheduleView  />}
+          {view === 'market'    && <MarketView    onTrade={doTrade}/>}
+          {view === 'portfolio' && <PortfolioView onTrade={doTrade}/>}
+          {view === 'standings' && <StandingsView />}
+          {view === 'bracket'   && <BracketView   />}
+          {view === 'ranking'   && <RankingView   />}
         </div>
       </div>
 
       {/* OVERLAYS */}
-      {modal&&<TradeModal nation={modal.nation} initMode={modal.mode} onClose={()=>setModal(null)}/>}
-      {simResult&&<ResultOverlay result={simResult} onClose={()=>{ setSimResult(null); setView('market'); }}/>}
-      {showTut&&<TutorialOverlay onClose={()=>setShowTut(false)}/>}
+      {modal      && <TradeModal nation={modal.nation} initMode={modal.mode} onClose={() => setModal(null)}/>}
+      {simResults && <ResultOverlay results={simResults} onClose={() => setSimResults(null)}/>}
+      {showTut    && <TutorialOverlay onClose={() => setShowTut(false)}/>}
     </div>
   );
 }
