@@ -30,7 +30,8 @@ export default function AuthWidget({ compact = false }: Props) {
     return () => window.removeEventListener('kickstock:pseudo-saved', onSaved);
   }, []);
 
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen,     setPanelOpen]     = useState(false);
+  const [emailAuthOpen, setEmailAuthOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -128,8 +129,6 @@ export default function AuthWidget({ compact = false }: Props) {
   }
 
   // ── Anonymous ─────────────────────────────────────────────────────────────
-  const [emailAuthOpen, setEmailAuthOpen] = useState(false);
-
   return (
     <>
       <button
