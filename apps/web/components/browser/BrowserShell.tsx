@@ -8,8 +8,10 @@ import TradeModal from '@/components/shared/TradeModal';
 import NationDetailOverlay from '@/components/shared/NationDetailOverlay';
 import MatchDetailOverlay from '@/components/shared/MatchDetailOverlay';
 import MatchAnimation from '@/components/mobile/MatchAnimation';
+import { Suspense } from 'react';
 import AuthWidget from '@/components/shared/AuthWidget';
 import GuestModal from '@/components/auth/GuestModal';
+import WelcomeModal from '@/components/auth/WelcomeModal';
 import { getPseudo } from '@/lib/pseudo';
 import { PriceDisplay, TradeActions, SimulateButton, usePortfolioTotals } from '@/components/mechanics';
 import { useValidateMechanics } from '@/hooks/useValidateMechanics';
@@ -946,6 +948,7 @@ export default function BrowserShell() {
   return (
     <>
     <GuestModal onDone={() => {}} />
+    <Suspense><WelcomeModal /></Suspense>
     <div className="ks-browser">
       {/* SIDEBAR */}
       <nav className="sb">

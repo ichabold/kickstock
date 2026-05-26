@@ -6,7 +6,8 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { fmt } from '@kickstock/game-engine';
 import { useGameStore } from '@/stores/gameStore';
-import { getPseudo } from '@/lib/pseudo';
+import { getPseudo, clearPseudo } from '@/lib/pseudo';
+import { getDeviceId } from '@/lib/device';
 import BottomSheet from './BottomSheet';
 
 interface Props {
@@ -203,6 +204,7 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
   async function handleGoogle() {
     setGoogleLoading(true);
     setGoogleError('');
+    document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error } = await sb.auth.signInWithOAuth({
       provider: 'google',

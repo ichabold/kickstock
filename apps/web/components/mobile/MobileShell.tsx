@@ -5,8 +5,10 @@ import { useGameStore, fmt } from '@/stores/gameStore';
 import { useValidateMechanics } from '@/hooks/useValidateMechanics';
 import { usePortfolioTotals } from '@/components/mechanics';
 import Ticker from '@/components/shared/Ticker';
+import { Suspense } from 'react';
 import AuthWidget from '@/components/shared/AuthWidget';
 import GuestModal from '@/components/auth/GuestModal';
+import WelcomeModal from '@/components/auth/WelcomeModal';
 import MarketTab from './MarketTab';
 import ScheduleTab from './ScheduleTab';
 import PortfolioTab from './PortfolioTab';
@@ -104,6 +106,7 @@ export default function MobileShell() {
       </main>
 
       <GuestModal onDone={() => {}} />
+      <Suspense><WelcomeModal /></Suspense>
 
       {/* BOTTOM NAV */}
       <nav className={styles.nav}>

@@ -218,6 +218,8 @@ function GoogleButton() {
   async function handleGoogle() {
     setLoading(true);
     setError('');
+    // Store device_id so the callback route can migrate the guest portfolio
+    document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error } = await sb.auth.signInWithOAuth({
       provider: 'google',
