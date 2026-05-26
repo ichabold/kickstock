@@ -1050,6 +1050,7 @@ export default function BrowserShell() {
           <div className="tb-title">{view.toUpperCase()}</div>
           <div className="tb-stats">
             <div className="tbs"><div className="tbs-l">Portefeuille</div><div className="tbs-v g">{fmt(totVal)} KC</div></div>
+            <div className="tbs"><div className="tbs-l">Cash dispo</div><div className="tbs-v">{fmt(cash)} KC</div></div>
             <div className="tbs"><div className="tbs-l">P&amp;L</div><div className={`tbs-v ${pl >= 0 ? 'gn' : 'ls'}`}>{pl >= 0 ? '▲ +' : '▼ '}{fmt(Math.abs(pl))}</div></div>
             <div className="tbs"><div className="tbs-l">Positions</div><div className="tbs-v">{positions}</div></div>
             <div className="tbs"><div className="tbs-l">Journée</div><div className="tbs-v">J·{dayIndex+1}</div></div>

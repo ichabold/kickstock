@@ -195,9 +195,7 @@ export const useLocalGameStore = create<LocalGameStore>()(
 
         if (mode === 'buy') {
           if (s.eliminated.includes(nationId)) return 'Nation éliminée 💀';
-          const subtotal = price * quantity;
-          const tax      = calcTax(subtotal, price, isKO);
-          const total    = subtotal + tax;
+          const total = price * quantity; // no tax on buys
           if (s.cash < total) return 'Fonds insuffisants';
 
           const prevQty = s.portfolio[nationId] ?? 0;

@@ -3,8 +3,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
-import { fmt } from '@kickstock/game-engine';
 import { useGameStore } from '@/stores/gameStore';
+import { fmt } from '@kickstock/game-engine';
 import { getPseudo, clearPseudo } from '@/lib/pseudo';
 import { getDeviceId } from '@/lib/device';
 import BottomSheet from './BottomSheet';
@@ -206,6 +206,9 @@ function AccountMenu({ name, bestScore, avatarUrl, initial, onSignOut }: {
   initial: string;
   onSignOut: () => void;
 }) {
+  const [confirmReset, setConfirmReset] = useState(false);
+  const resetGame = useGameStore(s => s.resetGame);
+
   return (
     <div style={s.menuWrap}>
       <div style={s.menuHeader}>
@@ -220,9 +223,39 @@ function AccountMenu({ name, bestScore, avatarUrl, initial, onSignOut }: {
         </div>
       </div>
       <div style={s.menuDivider} />
+      <button onClick={() => setConfirmReset(true)} style={s.resetBtn}>
+        🔄 Recommencer une partie
+      </button>
       <button onClick={onSignOut} style={s.signOutBtn}>
         Déconnexion
       </button>
+
+      {confirmReset && (
+        <ResetConfirmOverlay
+          onConfirm={() => { resetGame(); setConfirmReset(false); }}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+function ResetConfirmOverlay({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div style={s.confirmOverlay}>
+      <div style={s.confirmCard}>
+        <div style={s.confirmTitle}>RECOMMENCER ?</div>
+        <div style={s.confirmText}>
+          Tu vas perdre toute ta progression actuelle : cash, positions, historique.
+          Cette action est irréversible.
+        </div>
+        <button onClick={onConfirm} style={s.confirmDanger}>
+          OUI, RECOMMENCER
+        </button>
+        <button onClick={onCancel} style={s.confirmCancel}>
+          Annuler
+        </button>
+      </div>
     </div>
   );
 }
@@ -427,5 +460,77 @@ const s: Record<string, React.CSSProperties> = {
     fontFamily: 'var(--font-body)',
     textAlign: 'left' as const,
     transition: 'border-color .15s, color .15s',
+    marginTop: 6,
+  },
+  resetBtn: {
+    width: '100%',
+    background: 'none',
+    border: '1px solid var(--border)',
+    borderRadius: 7,
+    padding: '9px 12px',
+    color: 'var(--muted)',
+    fontSize: 12,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
+    textAlign: 'left' as const,
+    transition: 'border-color .15s, color .15s',
+    marginBottom: 6,
+  },
+  confirmOverlay: {
+    position: 'fixed' as const,
+    inset: 0,
+    zIndex: 600,
+    background: 'rgba(0,0,0,0.85)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px 16px',
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 320,
+    background: 'var(--s1)',
+    border: '1px solid var(--border-hi)',
+    borderRadius: 16,
+    padding: '24px 20px 20px',
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 12,
+  },
+  confirmTitle: {
+    fontFamily: 'var(--font-display)',
+    fontSize: 18,
+    letterSpacing: 3,
+    color: 'var(--text)',
+    textAlign: 'center' as const,
+  },
+  confirmText: {
+    fontSize: 12,
+    color: 'var(--muted)',
+    lineHeight: 1.6,
+    textAlign: 'center' as const,
+  },
+  confirmDanger: {
+    width: '100%',
+    background: 'var(--loss)',
+    color: '#fff',
+    border: 'none',
+    borderRadius: 9,
+    padding: '12px 0',
+    fontFamily: 'var(--font-display)',
+    fontSize: 14,
+    letterSpacing: 2,
+    cursor: 'pointer',
+  },
+  confirmCancel: {
+    width: '100%',
+    background: 'none',
+    border: '1px solid var(--border)',
+    borderRadius: 9,
+    padding: '10px 0',
+    color: 'var(--muted)',
+    fontSize: 12,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
   },
 };
