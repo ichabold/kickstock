@@ -9,6 +9,7 @@ import { Suspense } from 'react';
 import AuthWidget from '@/components/shared/AuthWidget';
 import GuestModal from '@/components/auth/GuestModal';
 import WelcomeModal from '@/components/auth/WelcomeModal';
+import { useAuth } from '@/hooks/useAuth';
 import MarketTab from './MarketTab';
 import ScheduleTab from './ScheduleTab';
 import PortfolioTab from './PortfolioTab';
@@ -27,12 +28,20 @@ const TABS: { id: TabId; ico: string; label: string; play?: boolean }[] = [
 ];
 
 export default function MobileShell() {
-  const [tab, setTab] = useState<TabId>('schedule');
+  const [tab, setTab]         = useState<TabId>('schedule');
+  const { user: mobileUser }  = useAuth();
 
   useEffect(() => {
     useGameStore.getState().startSync();
     return () => useGameStore.getState().stopSync();
   }, []);
+
+  // Cross-device sync: load server state when a registered user logs in
+  const syncUser = useGameStore(s => (s as { syncFromServer?: () => Promise<void> }).syncFromServer);
+  useEffect(() => {
+    if (mobileUser) syncUser?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobileUser?.id]);
 
   // Pattern 3 — validate at mount that this shell covers all required mechanics
   useValidateMechanics({

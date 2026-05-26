@@ -961,11 +961,19 @@ export default function BrowserShell() {
   const [nationId,     setNationId]     = useState<string | null>(null);
   const [matchDetail,  setMatchDetail]  = useState<{ result: StoredMatchResult; dayLabel: string } | null>(null);
   const [showTut,      setShowTut]      = useState(false);
+  const { user: browserUser }           = useAuth();
 
   useEffect(() => {
     useGameStore.getState().startSync();
     return () => useGameStore.getState().stopSync();
   }, []);
+
+  // Cross-device sync: load server state when a registered user logs in
+  const syncUser = useGameStore(s => (s as { syncFromServer?: () => Promise<void> }).syncFromServer);
+  useEffect(() => {
+    if (browserUser) syncUser?.();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [browserUser?.id]);
 
   // Pattern 3 — validate at mount that this shell covers all required mechanics
   useValidateMechanics({

@@ -15,8 +15,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const adminRpc = (a: ReturnType<typeof createAdminClient>, fn: string, args: object) => (a as any).rpc(fn, args);
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const adminFrom = (a: ReturnType<typeof createAdminClient>, t: string) => (a as any).from(t);
 
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
@@ -62,14 +60,10 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
 
   // ── Detect first-time signup ──────────────────────────────────────────────
-  // Profile created within the last 2 minutes = brand new Google account
-  const { data: profile } = await adminFrom(admin, 'profiles')
-    .select('created_at, username')
-    .eq('id', userId)
-    .single();
-
-  const isNewUser = profile?.created_at
-    ? Date.now() - new Date(profile.created_at).getTime() < 2 * 60 * 1000
+  // Use session.user.created_at — available immediately without a DB round-trip.
+  // (Querying the profiles table here races the auth trigger that creates the row.)
+  const isNewUser = session.user.created_at
+    ? Date.now() - new Date(session.user.created_at).getTime() < 2 * 60 * 1000
     : false;
 
   // ── Migrate guest portfolio if device_id present ──────────────────────────
