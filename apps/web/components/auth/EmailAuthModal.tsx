@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { isValidPseudoFormat } from '@/lib/pseudo';
+import { isValidPseudoFormat, getPseudo } from '@/lib/pseudo';
 import { getDeviceId } from '@/lib/device';
 
 type View = 'signin' | 'signup' | 'forgot' | 'check-email' | 'forgot-sent';
@@ -117,12 +117,22 @@ function SignInView({ onForgot, onClose }: { onForgot: () => void; onClose: () =
 // ─── Sign Up ──────────────────────────────────────────────────────────────────
 
 function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClose: () => void }) {
-  const [pseudo,    setPseudo]    = useState('');
+  // Pre-fill with the guest pseudo if the player already chose one
+  const guestPseudo = getPseudo();
+  const [pseudo,    setPseudo]    = useState(guestPseudo ?? '');
   const [email,     setEmail]     = useState('');
   const [password,  setPassword]  = useState('');
   const [pseudoState, setPseudoState] = useState<'idle' | 'checking' | 'ok' | 'taken'>('idle');
   const [loading,   setLoading]   = useState(false);
   const [error,     setError]     = useState('');
+
+  // Immediately verify the pre-filled guest pseudo availability
+  useEffect(() => {
+    if (guestPseudo && isValidPseudoFormat(guestPseudo)) {
+      checkPseudo(guestPseudo);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function checkPseudo(value: string) {
     if (!isValidPseudoFormat(value)) { setPseudoState('idle'); return; }

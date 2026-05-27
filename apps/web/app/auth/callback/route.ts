@@ -74,7 +74,23 @@ export async function GET(request: NextRequest) {
       p_device_id: deviceId,
       p_user_id:   userId,
     });
-    migrationStatus = (result as { status: string } | null)?.status ?? null;
+    const rpcResult = result as { status: string; guest_username?: string } | null;
+    migrationStatus = rpcResult?.status ?? null;
+
+    // If the guest had a chosen pseudo, carry it into the new account's profile —
+    // but only if the profile's username is still auto-generated (is_auto = TRUE).
+    const guestUsername = rpcResult?.guest_username;
+    if (
+      guestUsername &&
+      (migrationStatus === 'migrated' || migrationStatus === 'conflict_resolved')
+    ) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from('profiles')
+        .update({ username: guestUsername, is_auto: false })
+        .eq('id', userId)
+        .eq('is_auto', true);
+    }
   }
 
   // ── Build redirect URL with welcome params ────────────────────────────────

@@ -5,8 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 import { useGameStore } from '@/stores/gameStore';
 import { fmt } from '@kickstock/game-engine';
-import { isValidPseudoFormat } from '@/lib/pseudo';
-import { clearPseudo } from '@/lib/pseudo';
+import { isValidPseudoFormat, getPseudo, clearPseudo } from '@/lib/pseudo';
 
 type Step = 'migration' | 'username' | null;
 
@@ -23,8 +22,10 @@ export default function WelcomeModal() {
   // Determine which step to show once auth is resolved
   useEffect(() => {
     if (!user) return;
-    if (isMigrated)     { setStep('migration'); return; }
-    if (isNewUser)      { setStep('username');  return; }
+    if (isMigrated) { setStep('migration'); return; }
+    // Show username prompt only for brand-new Google users who didn't migrate
+    // (email signups already supply their pseudo at signup time)
+    if (isNewUser && !isMigrated) { setStep('username'); return; }
   }, [user, isMigrated, isNewUser]);
 
   // Clean up guest pseudo from localStorage on successful account creation
@@ -51,10 +52,8 @@ export default function WelcomeModal() {
     <div style={s.overlay}>
       <div style={s.card}>
         {step === 'migration' && (
-          <MigrationStep onNext={() => {
-            if (isNewUser) setStep('username');
-            else handleDone();
-          }} />
+          // Pseudo is already carried over from the guest account — skip username step
+          <MigrationStep onNext={handleDone} />
         )}
         {step === 'username' && (
           <UsernameStep onDone={handleDone} />
@@ -66,7 +65,7 @@ export default function WelcomeModal() {
 
 // ─── Migration confirmation ───────────────────────────────────────────────────
 
-function MigrationStep({ onNext }: { onNext: () => void }) {
+function MigrationStep({ onNext }: { onNext: () => void; }) {
   const cash      = useGameStore(s => s.cash);
   const portfolio = useGameStore(s => s.portfolio);
   const prices    = useGameStore(s => s.prices);
@@ -80,7 +79,7 @@ function MigrationStep({ onNext }: { onNext: () => void }) {
     <>
       <div style={s.checkmark}>✓</div>
       <div style={s.title}>COMPTE CRÉÉ</div>
-      <div style={s.subtitle}>Ta progression a été migrée</div>
+      <div style={s.subtitle}>Ta progression et ton pseudo ont été migrés</div>
 
       <div style={s.statsBox}>
         <StatRow label="Valeur totale"   value={`${fmt(totalVal)} KC`} />
@@ -107,19 +106,30 @@ function StatRow({ label, value }: { label: string; value: string }) {
 // ─── Username prompt ──────────────────────────────────────────────────────────
 
 function UsernameStep({ onDone }: { onDone: () => void }) {
-  const { user, profile } = useAuth();
-  const [pseudo,    setPseudo]    = useState('');
+  const { user } = useAuth();
+
+  // Priority: guest pseudo from localStorage → Google display name
+  const guestPseudo = getPseudo();
+  const initialPseudo = (() => {
+    if (guestPseudo && isValidPseudoFormat(guestPseudo)) return guestPseudo;
+    const name = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? '';
+    const cleaned = name.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20);
+    return cleaned.length >= 3 ? cleaned : '';
+  })();
+
+  const [pseudo,    setPseudo]    = useState(initialPseudo);
   const [state,     setState]     = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [saving,    setSaving]    = useState(false);
   const [error,     setError]     = useState('');
 
-  // Pre-fill with Google display name (cleaned)
+  // Immediately check availability for the pre-filled pseudo
   useEffect(() => {
-    const name = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? '';
-    const cleaned = name.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 20);
-    if (cleaned.length >= 3) setPseudo(cleaned);
-  }, [user]);
+    if (initialPseudo && isValidPseudoFormat(initialPseudo)) {
+      checkAvailability(initialPseudo);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function checkAvailability(value: string) {
     if (!isValidPseudoFormat(value)) { setState('idle'); return; }

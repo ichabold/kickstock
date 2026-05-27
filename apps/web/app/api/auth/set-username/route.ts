@@ -67,9 +67,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'taken' }, { status: 409 });
   }
 
-  // Update using admin client (bypasses RLS)
+  // Update using admin client (bypasses RLS); mark as user-chosen
   const { error: updateErr } = await adminFrom(admin, 'profiles')
-    .update({ username: trimmed })
+    .update({ username: trimmed, is_auto: false })
     .eq('id', user.id);
 
   if (updateErr) {
