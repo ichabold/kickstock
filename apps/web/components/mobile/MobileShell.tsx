@@ -15,17 +15,10 @@ import ScheduleTab from './ScheduleTab';
 import PortfolioTab from './PortfolioTab';
 import SimulateTab from './SimulateTab';
 import StandingsTab from './StandingsTab';
+import BottomNav from './BottomNav';
 import styles from './MobileShell.module.css';
 import type { TabId } from '@kickstock/types';
 import { CALENDAR } from '@kickstock/constants';
-
-const TABS: { id: TabId; ico: string; label: string; play?: boolean }[] = [
-  { id: 'schedule',  ico: '📅', label: 'SCHED.'  },
-  { id: 'standings', ico: '🏆', label: 'STNDGS'  },
-  { id: 'simulate',  ico: '⚡', label: 'PLAY',  play: true },
-  { id: 'market',    ico: '📊', label: 'MARKET'  },
-  { id: 'portfolio', ico: '💼', label: 'PORTF.'  },
-];
 
 export default function MobileShell() {
   const [tab, setTab]         = useState<TabId>('schedule');
@@ -118,20 +111,11 @@ export default function MobileShell() {
       <Suspense><WelcomeModal /></Suspense>
 
       {/* BOTTOM NAV */}
-      <nav className={styles.nav}>
-        {TABS.map(t => (
-          <button
-            key={t.id}
-            className={`${styles.navBtn} ${tab === t.id ? styles.navBtnOn : ''} ${t.play ? styles.navBtnPlay : ''}`}
-            onClick={() => setTab(t.id)}
-            aria-label={t.label}
-            aria-current={tab === t.id ? 'page' : undefined}
-          >
-            <span className={styles.navIco}>{t.ico}</span>
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <BottomNav
+        active={tab}
+        onChange={setTab}
+        onPlay={() => setTab('simulate')}
+      />
     </div>
   );
 }

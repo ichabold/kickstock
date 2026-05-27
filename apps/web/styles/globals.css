@@ -1,31 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;600;700&family=Inter+Tight:wght@400;500;600;700&display=swap');
+@import './tokens.css';
 @import './browser.css';
-
-/* ─── CSS CUSTOM PROPERTIES ─────────────────────────────────────────────── */
-:root {
-  --bg:       #0A0A0A;
-  --s1:       #111111;
-  --s2:       #181818;
-  --text:     #FFFFFF;
-  --muted:    #888888;
-  --dim:      #444444;
-  --ghost:    #1A1A1A;
-  --border:   #1E1E1E;
-  --border-hi:#2E2E2E;
-  --gold:     #FFDB00;
-  --gold-dk:  #B89800;
-  --gain:     #00FF87;
-  --gain-bg:  rgba(0,255,135,0.07);
-  --gain-dk:  #00662F;
-  --loss:     #FF3B5C;
-  --loss-bg:  rgba(255,59,92,0.08);
-  --loss-dk:  #7A1B2C;
-  --upset:    #FF8800;
-
-  --font-display: 'Bebas Neue', sans-serif;
-  --font-mono:    'JetBrains Mono', monospace;
-  --font-body:    'Inter Tight', sans-serif;
-}
 
 /* ─── RESET ──────────────────────────────────────────────────────────────── */
 *, *::before, *::after {

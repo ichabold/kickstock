@@ -20,9 +20,44 @@ const PHASE_LABEL: Record<string, string> = {
   QF: 'QUARTER-FINAL', SF: 'SEMI-FINAL', Final: '🏆 FINAL', '3rd': '3RD PLACE',
 };
 
-type AnimPhase = 'playing' | 'et' | 'pens' | 'result';
+// Timing constants, tunable from one place
+const ANIM = {
+  play:       9000,
+  et:         5000,
+  stinger:    1500,
+  penKick:     900,
+  penDecided:  300,  // fast-forward once result is mathematically decided
+  resultIn:    400,
+};
 
-interface PenKick { team: 'A' | 'B'; name: string; scored: boolean; }
+type AnimPhase = 'playing' | 'stingerET' | 'et' | 'stingerPens' | 'pens' | 'result';
+
+interface PenKick { team: 'A' | 'B'; name: string; scored: boolean; reveal: 'pending' | 'scored' | 'missed'; }
+
+function PhaseStinger({ label, sub, tone, onDone }: {
+  label: string; sub?: string; tone: 'gold' | 'loss'; onDone: () => void;
+}) {
+  useEffect(() => { const id = setTimeout(onDone, ANIM.stinger); return () => clearTimeout(id); }, [onDone]);
+  return (
+    <div className={styles.stinger} data-tone={tone}>
+      <div className={styles.stingerLabel}>{label}</div>
+      {sub && <div className={styles.stingerSub}>{sub}</div>}
+    </div>
+  );
+}
+
+function isPenDecided(played: PenKick[], targetA: number, targetB: number): boolean {
+  const scoredA = played.filter(k => k.team === 'A' && k.scored).length;
+  const scoredB = played.filter(k => k.team === 'B' && k.scored).length;
+  const remainA = Math.max(0, 5 - played.filter(k => k.team === 'A').length);
+  const remainB = Math.max(0, 5 - played.filter(k => k.team === 'B').length);
+  if (played.length < 10) {
+    if (scoredA > scoredB + remainB) return true;
+    if (scoredB > scoredA + remainA) return true;
+    return false;
+  }
+  return scoredA === targetA && scoredB === targetB;
+}
 
 export default function MatchAnimation({ results, portfolio, prices, onDone }: Props) {
   const [idx, setIdx] = useState(0);
@@ -90,7 +125,7 @@ function SingleMatch({
         clearInterval(timerRef.current!);
         setWhistle(true);
         if (result.res90 === 'draw' && (result.etRes || result.penWinner)) {
-          setTimeout(() => { setPhase('et'); startET(); }, 600);
+          setTimeout(() => setPhase('stingerET'), 600);
         } else {
           setTimeout(() => setPhase('result'), 400);
           setTimeout(() => setShowRes(true), 700);
@@ -120,7 +155,7 @@ function SingleMatch({
         clearInterval(timerRef.current!);
         setWhistle(true);
         if (result.penWinner) {
-          setTimeout(() => { setPhase('pens'); startPens(); }, 600);
+          setTimeout(() => setPhase('stingerPens'), 600);
         } else {
           // ET winner scored
           const etGoal = goals.find(g => g.min > 90 && g.team === result.etRes);
@@ -139,6 +174,7 @@ function SingleMatch({
   // ── Penalty phase ─────────────────────────────────────────────────────────
   const startPens = useCallback(() => {
     setWhistle(false);
+    setPenEvents([]);
     const poolA = SCORER_POOL[result.a] ?? [nA.name];
     const poolB = SCORER_POOL[result.b] ?? [nB.name];
     const kicks: PenKick[] = [];
@@ -152,19 +188,44 @@ function SingleMatch({
       const name = pool[idx2 % pool.length];
       const scored = team === 'A' ? cA < tgt.A : cB < tgt.B;
       if (scored) { team === 'A' ? cA++ : cB++; }
-      kicks.push({ team, name, scored });
+      kicks.push({ team, name, scored, reveal: 'pending' });
     }
-    const INTERVAL = 1200;
-    kicks.forEach((k, i) => {
-      const t = setTimeout(() => setPenEvents(p => [...p, k]), i * INTERVAL);
-      goalRefs.current.push(t);
-    });
-    const t = setTimeout(() => {
-      setPhase('result');
-      setTimeout(() => setShowRes(true), 300);
-    }, kicks.length * INTERVAL + 800);
-    goalRefs.current.push(t);
-  }, [result, nA.name, nB.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const played: PenKick[] = [];
+    let i = 0;
+    const heldA = (portfolio[result.a] ?? 0) > 0;
+    const heldB = (portfolio[result.b] ?? 0) > 0;
+
+    const tick = () => {
+      if (i >= kicks.length) {
+        const doneId = setTimeout(() => {
+          setPhase('result');
+          setTimeout(() => setShowRes(true), 300);
+        }, 200);
+        goalRefs.current.push(doneId);
+        return;
+      }
+      const k = { ...kicks[i], reveal: 'pending' as const };
+      played.push(k);
+      setPenEvents([...played]);
+
+      // After 450ms reveal scored/missed
+      const revealId = setTimeout(() => {
+        played[played.length - 1] = { ...k, reveal: k.scored ? 'scored' : 'missed' };
+        setPenEvents([...played]);
+        if (k.team === 'A' && heldA) navigator.vibrate?.(k.scored ? 8 : 30);
+        else if (k.team === 'B' && heldB) navigator.vibrate?.(k.scored ? 8 : 30);
+      }, 450);
+      goalRefs.current.push(revealId);
+
+      i++;
+      const decided = isPenDecided(played, result.penA, result.penB);
+      const next = decided ? ANIM.penDecided : ANIM.penKick;
+      const nextId = setTimeout(tick, next);
+      goalRefs.current.push(nextId);
+    };
+    tick();
+  }, [result, nA.name, nB.name, portfolio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     startPlaying();
@@ -182,7 +243,7 @@ function SingleMatch({
     if (result.penWinner) {
       const kicks: PenKick[] = [];
       for (let i = 0; i < result.penA + result.penB; i++) {
-        kicks.push({ team: i % 2 === 0 ? 'A' : 'B', name: '—', scored: true });
+        kicks.push({ team: i % 2 === 0 ? 'A' : 'B', name: '—', scored: true, reveal: 'scored' });
       }
       setPenEvents(kicks);
     }
@@ -217,7 +278,8 @@ function SingleMatch({
 
   const divCash = result.divCash ?? 0;
   const phaseHdr = PHASE_LABEL[result.phase] ?? result.phase;
-  const subHdr = phase === 'et' ? '⚡ EXTRA TIME' : phase === 'pens' ? '🎯 PÉNALTIES' : null;
+  const subHdr = phase === 'et' || phase === 'stingerET' ? '⚡ EXTRA TIME'
+    : phase === 'pens' || phase === 'stingerPens' ? '🎯 PENALTIES' : null;
 
   const penScoreA = penEvents.filter(k => k.team === 'A' && k.scored).length;
   const penScoreB = penEvents.filter(k => k.team === 'B' && k.scored).length;
@@ -238,6 +300,24 @@ function SingleMatch({
 
   return (
     <div className={styles.wrap} role="status" aria-live="polite">
+      {/* Phase stingers */}
+      {phase === 'stingerET' && (
+        <PhaseStinger
+          label="EXTRA TIME"
+          sub="30 minutes added"
+          tone="gold"
+          onDone={() => { setPhase('et'); startET(); }}
+        />
+      )}
+      {phase === 'stingerPens' && (
+        <PhaseStinger
+          label="PENALTIES"
+          sub="Sudden death shootout"
+          tone="loss"
+          onDone={() => { setPhase('pens'); startPens(); }}
+        />
+      )}
+
       {/* Skip button */}
       {(phase === 'playing' || phase === 'et') && (
         <button className={styles.skipBtn} onClick={skip}>SKIP ▶▶</button>
@@ -254,7 +334,7 @@ function SingleMatch({
         <div className={styles.teamBox}>
           <div className={styles.teamFlagBig}>{nA.flag}</div>
           <div className={styles.teamNameSmall}>{nA.name.toUpperCase()}</div>
-          {(expA) && <div className={styles.expBadge}>⚡ EXPOSÉ</div>}
+          {(expA) && <div className={styles.expBadge}>EXPOSED</div>}
         </div>
         <div className={styles.scoreBox} aria-label={`${sA} à ${sB}`}>
           <div className={`${styles.scoreNum} ${fA ? styles.flashA : ''}`}>{sA}</div>
@@ -264,7 +344,7 @@ function SingleMatch({
         <div className={styles.teamBox}>
           <div className={styles.teamFlagBig}>{nB.flag}</div>
           <div className={styles.teamNameSmall}>{nB.name.toUpperCase()}</div>
-          {(expB) && <div className={styles.expBadge}>⚡ EXPOSÉ</div>}
+          {(expB) && <div className={styles.expBadge}>EXPOSED</div>}
         </div>
       </div>
 
@@ -305,17 +385,17 @@ function SingleMatch({
           <div className={styles.pensCols}>
             <div>
               {penEvents.filter(k => k.team === 'A').map((k, i) => (
-                <div key={i} className={`${styles.penKick} ${k.scored ? styles.penScored : styles.penMissed}`}>
-                  <span>{k.scored ? '⚽' : '❌'}</span>
+                <div key={i} className={styles.penKick} data-reveal={k.reveal}>
+                  {k.reveal === 'pending' ? '⋯' : k.reveal === 'scored' ? '⚽' : '❌'}
                   <span className={styles.penKickerName}>{k.name}</span>
                 </div>
               ))}
             </div>
             <div>
               {penEvents.filter(k => k.team === 'B').map((k, i) => (
-                <div key={i} className={`${styles.penKick} ${styles.penKickRight} ${k.scored ? styles.penScored : styles.penMissed}`}>
+                <div key={i} className={`${styles.penKick} ${styles.penKickRight}`} data-reveal={k.reveal}>
                   <span className={styles.penKickerName}>{k.name}</span>
-                  <span>{k.scored ? '⚽' : '❌'}</span>
+                  {k.reveal === 'pending' ? '⋯' : k.reveal === 'scored' ? '⚽' : '❌'}
                 </div>
               ))}
             </div>
