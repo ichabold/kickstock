@@ -1,0 +1,168 @@
+.bg {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.88);
+  z-index: var(--z-modal);
+  display: flex; justify-content: center; align-items: center;
+  padding: 16px;
+  animation: fadeIn var(--t-fast) ease-out;
+}
+@keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slideUp { from { transform: translateY(24px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+
+.sheet {
+  background: var(--surface-1);
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-xl);
+  padding: 20px;
+  width: 100%; max-width: 420px;
+  max-height: calc(100dvh - 60px);
+  overflow-y: auto;
+  animation: slideUp var(--t-base) var(--ease);
+}
+
+.head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.flag { font-size: 36px; }
+.title { font-family: var(--font-body); font-size: 20px; font-weight: 700; letter-spacing: .2px; margin: 0; }
+.sub   { font-size: var(--fs-eyebrow); color: var(--muted); margin: 2px 0 0; }
+.close {
+  width: 36px; height: 36px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.elimWarn {
+  background: var(--loss-bg);
+  border: 1px solid var(--loss-dk);
+  color: var(--loss);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  font-size: var(--fs-eyebrow);
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.modeRow {
+  display: flex;
+  gap: 4px;
+  background: #0a0a0a;
+  padding: 4px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+.modeBtn {
+  flex: 1;
+  height: 44px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-body);
+  font-weight: 700;
+  letter-spacing: 1px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.modeOnBuy  { background: var(--gain); color: #000; }
+.modeOnSell { background: var(--loss); color: #fff; }
+
+.stepper {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.stepper button {
+  height: 44px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+}
+.qty { text-align: center; font-family: var(--font-mono); font-size: 28px; font-weight: 700; }
+.max {
+  height: 44px;
+  padding: 0 14px;
+  background: transparent;
+  border: 1px solid var(--border-hi);
+  border-radius: var(--radius-md);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.slider {
+  width: 100%;
+  margin-bottom: 14px;
+  accent-color: var(--gold);
+}
+
+.summary {
+  background: #0a0a0a;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 16px;
+  margin: 0 0 14px;
+}
+.row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 5px 0; font-size: var(--fs-label);
+}
+.row dt { color: var(--muted); margin: 0; }
+.row dd { font-family: var(--font-mono); font-weight: 600; margin: 0; }
+.rowMuted dd  { color: var(--muted); }
+.rowAccent dd { color: var(--gold); }
+.rowHl {
+  border-top: 1px solid var(--border);
+  margin-top: 6px;
+  padding-top: 12px;
+}
+.rowHl dt { color: var(--text); font-weight: 700; font-size: 15px; }
+.rowHl dd { font-size: 18px; color: var(--gold); }
+.rowLoss dd { color: var(--loss); }
+
+.error {
+  background: var(--loss-bg);
+  border: 1px solid var(--loss-dk);
+  color: var(--loss);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  font-size: var(--fs-label);
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.cta {
+  width: 100%;
+  height: 56px;
+  border: none;
+  border-radius: var(--radius-md);
+  font-family: var(--font-display);
+  font-size: 20px;
+  letter-spacing: 3px;
+  cursor: pointer;
+  margin-bottom: 6px;
+}
+.cta:disabled { opacity: .35; cursor: not-allowed; }
+.ctaBuy  { background: var(--gain); color: #000; }
+.ctaSell { background: var(--loss); color: #fff; }
+
+.cancel {
+  width: 100%;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}

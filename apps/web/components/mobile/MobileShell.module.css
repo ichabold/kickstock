@@ -1,0 +1,76 @@
+.shell {
+  width: 100%;
+  max-width: 430px;
+  margin: 0 auto;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  position: relative;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.logo {
+  font-family: var(--font-display);
+  font-size: 28px;
+  letter-spacing: 5px;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.stats { display: flex; gap: 1px; }
+.stat  { padding: 2px 8px; text-align: right; border-left: 1px solid var(--border); }
+.statLbl { font-size: var(--fs-eyebrow); letter-spacing: 2px; color: var(--dim); font-weight: 700; margin-bottom: 2px; }
+.statVal { font-family: var(--font-mono); font-size: 12px; font-weight: 700; }
+
+.authArea { margin-left: 8px; flex-shrink: 0; }
+
+.statusBar {
+  padding: 4px 12px;
+  background: var(--s2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-shrink: 0;
+}
+.statusDay { font-family: var(--font-mono); font-size: var(--fs-eyebrow); color: var(--muted); font-weight: 600; }
+.pill { font-size: var(--fs-eyebrow); font-weight: 700; letter-spacing: 1px; padding: 3px 8px; border-radius: var(--radius-sm); border: 1px solid; }
+.pillGroup { border-color: var(--gold-dk); color: var(--gold); }
+.pillKO    { border-color: var(--loss-dk); color: var(--loss); }
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px;
+  scrollbar-width: none;
+  min-height: 0;
+}
+.scroll::-webkit-scrollbar { display: none; }
+
+/* ── Tournament progress bar ─────────────────────────────────────────────── */
+.progress {
+  height: 2px;
+  background: var(--border);
+  flex-shrink: 0;
+  position: relative;
+  overflow: hidden;
+}
+.progressFill {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  background: var(--gold);
+  transition: width 0.6s var(--ease);
+  opacity: 0.7;
+}
