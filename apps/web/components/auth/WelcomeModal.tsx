@@ -19,6 +19,11 @@ export default function WelcomeModal() {
 
   const [step, setStep] = useState<Step>(null);
 
+  // Capture the guest pseudo ONCE at mount, before clearPseudo() can erase it.
+  // Both effects below run after render; capturing in state (lazy initializer)
+  // ensures we read localStorage synchronously during this render pass.
+  const [savedGuestPseudo] = useState<string | null>(() => getPseudo());
+
   // Determine which step to show once auth is resolved
   useEffect(() => {
     if (!user) return;
@@ -27,11 +32,6 @@ export default function WelcomeModal() {
     // (email signups already supply their pseudo at signup time)
     if (isNewUser && !isMigrated) { setStep('username'); return; }
   }, [user, isMigrated, isNewUser]);
-
-  // Clean up guest pseudo from localStorage on successful account creation
-  useEffect(() => {
-    if (user) clearPseudo();
-  }, [user]);
 
   function cleanUrl() {
     const url = new URL(window.location.href);
@@ -42,6 +42,8 @@ export default function WelcomeModal() {
   }
 
   function handleDone() {
+    // Clear the guest pseudo now that the account exists
+    clearPseudo();
     setStep(null);
     cleanUrl();
   }
@@ -56,7 +58,7 @@ export default function WelcomeModal() {
           <MigrationStep onNext={handleDone} />
         )}
         {step === 'username' && (
-          <UsernameStep onDone={handleDone} />
+          <UsernameStep onDone={handleDone} guestPseudo={savedGuestPseudo} />
         )}
       </div>
     </div>
@@ -105,11 +107,10 @@ function StatRow({ label, value }: { label: string; value: string }) {
 
 // ─── Username prompt ──────────────────────────────────────────────────────────
 
-function UsernameStep({ onDone }: { onDone: () => void }) {
+function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo: string | null }) {
   const { user } = useAuth();
 
-  // Priority: guest pseudo from localStorage → Google display name
-  const guestPseudo = getPseudo();
+  // Priority: guest pseudo (captured before clearPseudo) → Google display name
   const initialPseudo = (() => {
     if (guestPseudo && isValidPseudoFormat(guestPseudo)) return guestPseudo;
     const name = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? '';
