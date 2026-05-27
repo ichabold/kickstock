@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { getDeviceId } from '@/lib/device';
-import { getPseudo, setPseudo, isValidPseudoFormat } from '@/lib/pseudo';
+import { getPseudo, setPseudo, isValidPseudoFormat, saveOAuthPending } from '@/lib/pseudo';
 import EmailAuthModal from '@/components/auth/EmailAuthModal';
 import { useGameStore } from '@/stores/gameStore';
 
@@ -242,6 +242,7 @@ function AccountButtons() {
   async function handleGoogle() {
     setGoogleLoading(true);
     setGoogleError('');
+    saveOAuthPending(); // persist guest pseudo before page navigates away
     document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error } = await sb.auth.signInWithOAuth({

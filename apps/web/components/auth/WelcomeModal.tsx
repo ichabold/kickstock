@@ -12,7 +12,7 @@ type Step = 'migration' | 'username' | null;
 export default function WelcomeModal() {
   const searchParams = useSearchParams();
   const router       = useRouter();
-  const { user, profile } = useAuth();
+  const { user } = useAuth();
 
   const isMigrated = searchParams.get('ks_migrated') === '1';
   const isNewUser  = searchParams.get('ks_new_user')  === '1';
@@ -23,72 +23,37 @@ export default function WelcomeModal() {
   const ksPseudo = searchParams.get('ks_pseudo');
 
   const [step, setStep] = useState<Step>(null);
-  const [pseudoApplied, setPseudoApplied] = useState(false);
 
-  // Capture the guest pseudo from localStorage at component mount —
-  // synchronous (lazy useState initializer), before any useEffect (including
-  // AuthWidget's clearPseudo()) can erase it.
+  // Capture the guest pseudo from localStorage at mount (synchronous, before
+  // any useEffect can erase it) — used to skip the username prompt when the
+  // player already chose one as a guest.
   const [savedGuestPseudo] = useState<string | null>(() => getPseudo());
 
-  // The pseudo we want to apply. Two sources, same priority:
-  //   ksPseudo       — from migration path (callback encoded it in URL)
-  //   savedGuestPseudo — fallback when migration didn't find a portfolio
-  //                      (e.g. portfolio was deleted in cleanup) but the pseudo
-  //                      is still present in localStorage
-  const pendingPseudo: string | null = (() => {
-    if (ksPseudo && isValidPseudoFormat(ksPseudo)) return ksPseudo;
-    if (savedGuestPseudo && isValidPseudoFormat(savedGuestPseudo)) return savedGuestPseudo;
-    return null;
-  })();
-
-  // ── Apply pending pseudo once profile is available ────────────────────────
-  //
-  // We wait for `profile` (not just `user`) for two reasons:
-  //   1. We check profile.is_auto — never overwrite a user-chosen pseudo
-  //   2. By the time useAuth has fetched the profile, the auth trigger has
-  //      definitely run and the profile row exists in the DB
-  useEffect(() => {
-    if (!user || !profile || pseudoApplied || !pendingPseudo) return;
-
-    // profile.is_auto=false means the player already has a chosen pseudo — don't overwrite
-    if (!profile.is_auto) {
-      setPseudoApplied(true); // mark as handled so we don't keep re-checking
-      return;
-    }
-
-    setPseudoApplied(true);
-
-    const isSilent = !isMigrated; // migration path: reload triggered by handleDone instead
-
-    fetch('/api/auth/set-username', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: pendingPseudo }),
-    })
-      .then(() => { if (isSilent) window.location.reload(); })
-      .catch(() => { if (isSilent) window.location.reload(); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, profile?.id, pseudoApplied]);
+  // Whether the player has a pending pseudo to apply (decides which step to show).
+  // The actual application is handled by AuthWidget (always mounted, never
+  // cancelled by an unmount mid-flow).
+  const hasPendingPseudo =
+    (ksPseudo    && isValidPseudoFormat(ksPseudo))    ||
+    (savedGuestPseudo && isValidPseudoFormat(savedGuestPseudo));
 
   // ── Determine which modal step to show ───────────────────────────────────
   useEffect(() => {
     if (!user) return;
 
     if (isMigrated) {
-      // Show migration confirmation; pseudo is applied by the effect above
       setStep('migration');
       return;
     }
 
-    if (pendingPseudo) {
-      // Pseudo will be applied silently — just clean the URL, no modal needed
-      cleanUrl();
+    if (isNewUser && !hasPendingPseudo) {
+      // Truly new Google user with no prior guest pseudo — ask them to choose
+      setStep('username');
       return;
     }
 
-    if (isNewUser) {
-      // Truly new Google user with no prior guest pseudo — ask them to choose
-      setStep('username');
+    // hasPendingPseudo: AuthWidget will apply it silently — just clean the URL
+    if (isNewUser && hasPendingPseudo) {
+      cleanUrl();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, isMigrated, isNewUser]);

@@ -10,7 +10,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { isValidPseudoFormat, getPseudo } from '@/lib/pseudo';
+import { isValidPseudoFormat, getPseudo, saveOAuthPending } from '@/lib/pseudo';
 import { getDeviceId } from '@/lib/device';
 
 type View = 'signin' | 'signup' | 'forgot' | 'check-email' | 'forgot-sent';
@@ -360,6 +360,7 @@ function GoogleBtn() {
   async function handleGoogle() {
     setLoading(true);
     setError('');
+    saveOAuthPending(); // persist guest pseudo before page navigates away
     document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error: err } = await sb.auth.signInWithOAuth({

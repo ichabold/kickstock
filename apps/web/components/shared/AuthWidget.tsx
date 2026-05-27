@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useGameStore } from '@/stores/gameStore';
 import { fmt } from '@kickstock/game-engine';
-import { getPseudo, clearPseudo, isValidPseudoFormat } from '@/lib/pseudo';
+import { getPseudo, clearPseudo, isValidPseudoFormat, getOAuthPending, clearOAuthPending, saveOAuthPending } from '@/lib/pseudo';
 import { getDeviceId } from '@/lib/device';
 import BottomSheet from './BottomSheet';
 import EmailAuthModal from '@/components/auth/EmailAuthModal';
@@ -29,6 +29,29 @@ export default function AuthWidget({ compact = false }: Props) {
     window.addEventListener('kickstock:pseudo-saved', onSaved);
     return () => window.removeEventListener('kickstock:pseudo-saved', onSaved);
   }, []);
+
+  // ── Apply pending OAuth pseudo (persistent across redirects) ───────────────
+  // We store the guest pseudo in localStorage BEFORE the OAuth redirect so it
+  // survives the round-trip. Here we apply it once the profile is available and
+  // is_auto=true (i.e. the account still has the trigger-generated username).
+  // This runs in AuthWidget (always mounted) — not WelcomeModal — so it is
+  // never cancelled by an unmount mid-flow.
+  useEffect(() => {
+    if (!user || !profile) return;
+    const pending = getOAuthPending();
+    clearOAuthPending(); // remove regardless, to avoid stale re-apply
+    if (!pending || !isValidPseudoFormat(pending)) return;
+    if (!profile.is_auto) return; // already has a user-chosen pseudo
+
+    fetch('/api/auth/set-username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: pending }),
+    })
+      .then(res => { if (res.ok) window.location.reload(); })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, profile?.id]);
 
   const [panelOpen,     setPanelOpen]     = useState(false);
   const [emailAuthOpen, setEmailAuthOpen] = useState(false);
@@ -398,6 +421,7 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
   async function handleGoogle() {
     setGoogleLoading(true);
     setGoogleError('');
+    saveOAuthPending(); // persist guest pseudo before the page navigates away
     document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error } = await sb.auth.signInWithOAuth({
