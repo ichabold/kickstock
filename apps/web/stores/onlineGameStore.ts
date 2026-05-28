@@ -4,7 +4,9 @@
  * onlineGameStore — Multiplayer version backed by Supabase.
  *
  * State is authoritative on the server (shared game_state row).
- * This store is used when NEXT_PUBLIC_OFFLINE_MODE is NOT set.
+ * Push model: Supabase Realtime notifies of game_state changes;
+ * we refetch only when the server signals something changed.
+ * A 30s fallback poll keeps clients in sync if the websocket drops.
  */
 
 import { create } from 'zustand';
@@ -13,7 +15,9 @@ import { fetchGameState, apiTrade, apiAdvanceDay } from '@/lib/api';
 import { pctOf, fmt } from '@kickstock/game-engine';
 import { NATIONS, CALENDAR } from '@kickstock/constants';
 import { buildMatchesForDay } from '@kickstock/game-engine';
+import { createClient } from '@/lib/supabase/client';
 import type { GameState, TradeMode, StoredMatchResult, Match } from '@kickstock/types';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 export { fmt, pctOf };
 
@@ -23,16 +27,17 @@ interface AdvanceDayResult {
 }
 
 interface GameStore extends GameState {
-  loading:   boolean;
-  syncing:   boolean;
-  error:     string | null;
-  fetchState: () => Promise<void>;
-  startSync:  () => void;
-  stopSync:   () => void;
-  trade:      (mode: TradeMode, nationId: string, quantity: number) => Promise<string | null>;
-  advanceDay: () => Promise<AdvanceDayResult | null>;
-  resetGame:  () => void;
-  _pollId:    ReturnType<typeof setInterval> | null;
+  loading:          boolean;
+  syncing:          boolean;
+  error:            string | null;
+  fetchState:       () => Promise<void>;
+  startSync:        () => void;
+  stopSync:         () => void;
+  trade:            (mode: TradeMode, nationId: string, quantity: number) => Promise<string | null>;
+  advanceDay:       () => Promise<AdvanceDayResult | null>;
+  resetGame:        () => void;
+  _pollId:          ReturnType<typeof setInterval> | null;
+  _realtimeChannel: RealtimeChannel | null;
 }
 
 function emptyState(): GameState {
@@ -59,10 +64,11 @@ function emptyState(): GameState {
 
 export const useOnlineGameStore = create<GameStore>((set, get) => ({
   ...emptyState(),
-  loading:  true,
-  syncing:  false,
-  error:    null,
-  _pollId:  null,
+  loading:          true,
+  syncing:          false,
+  error:            null,
+  _pollId:          null,
+  _realtimeChannel: null,
 
   fetchState: async () => {
     const deviceId = getDeviceId();
@@ -82,25 +88,56 @@ export const useOnlineGameStore = create<GameStore>((set, get) => ({
         loading: false, syncing: false, error: null,
       });
     } catch (err) {
+      if (String(err).includes('NOT_MODIFIED')) {
+        // 304: state unchanged — just clear loading flags
+        set({ loading: false, syncing: false });
+        return;
+      }
       set({ loading: false, syncing: false, error: String(err) });
     }
   },
 
   startSync: () => {
-    const existing = get()._pollId;
-    if (existing) return;
+    if (get()._pollId || get()._realtimeChannel) return;
+
+    // Initial fetch on mount
     get().fetchState();
+
+    // Supabase Realtime: receive a push whenever game_state changes (day advances)
+    // → refetch immediately instead of waiting for the next poll cycle.
+    // Prerequisite: enable Realtime on the game_state table in Supabase dashboard
+    // (Table Editor → game_state → Realtime toggle ON).
+    const supabase = createClient();
+    const channel = supabase
+      .channel('ks_game_state')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'game_state' },
+        () => {
+          if (get().syncing) return;
+          set({ syncing: true });
+          get().fetchState();
+        },
+      )
+      .subscribe();
+
+    // 30s fallback poll — keeps clients in sync if the websocket is unavailable
     const id = setInterval(() => {
       if (get().syncing) return;
       set({ syncing: true });
       get().fetchState();
-    }, 3_000);
-    set({ _pollId: id });
+    }, 30_000);
+
+    set({ _pollId: id, _realtimeChannel: channel });
   },
 
   stopSync: () => {
-    const id = get()._pollId;
-    if (id) { clearInterval(id); set({ _pollId: null }); }
+    const { _pollId, _realtimeChannel } = get();
+    if (_pollId) clearInterval(_pollId);
+    if (_realtimeChannel) {
+      createClient().removeChannel(_realtimeChannel);
+    }
+    set({ _pollId: null, _realtimeChannel: null });
   },
 
   trade: async (mode, nationId, quantity) => {

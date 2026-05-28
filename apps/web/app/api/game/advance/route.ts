@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
+import * as Sentry from '@sentry/nextjs';
 import {
   simulate, applyResult, genScore, genGoals,
   buildMatchesForDay, buildR32Pool,
@@ -21,6 +22,7 @@ import { NATIONS, CALENDAR, DIV_RATES } from '@kickstock/constants';
 import type { StoredMatchResult, GameState } from '@kickstock/types';
 
 export const dynamic = 'force-dynamic';
+export const maxDuration = 60; // Vercel: allow up to 60s for heavy match days
 
 // ── Local types for DB rows ───────────────────────────────────────────────────
 interface GSRow {
@@ -268,6 +270,7 @@ export async function POST(req: NextRequest) {
     }
 
   } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'POST /api/game/advance' } });
     console.error('[POST /api/game/advance]', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient as createServerClient } from '@/lib/supabase/server';
+import * as Sentry from '@sentry/nextjs';
 import { NATIONS } from '@kickstock/constants';
 import type { StoredMatchResult } from '@kickstock/types';
 
@@ -100,7 +101,7 @@ export async function GET(req: NextRequest) {
 
     const pf = pfRes.data as { cash: number; avg_cost: unknown; tx_log: unknown; best_score: number | null } | null;
 
-    return NextResponse.json({
+    const responseBody = {
       dayIndex:    gs.current_day_index,
       phase:       gs.current_phase,
       champion:    gs.champion_id ?? null,
@@ -119,9 +120,24 @@ export async function GET(req: NextRequest) {
       avgCost:     (pf?.avg_cost  as Record<string, number>) ?? {},
       txLog,
       bestScore:   pf?.best_score ?? null,
+    };
+
+    // ETag based on day + portfolio id so clients skip re-parsing unchanged state.
+    // day index changes on every advance; portfolioId ties the ETag to this player.
+    const etag = `"d${gs.current_day_index}-p${portfolioId}"`;
+    if (req.headers.get('If-None-Match') === etag) {
+      return new Response(null, { status: 304 });
+    }
+
+    return NextResponse.json(responseBody, {
+      headers: {
+        'ETag':          etag,
+        'Cache-Control': 'private, no-cache',
+      },
     });
 
   } catch (err) {
+    Sentry.captureException(err, { tags: { route: 'GET /api/game/state' } });
     console.error('[GET /api/game/state]', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }

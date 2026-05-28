@@ -57,24 +57,43 @@ export interface AdvanceDayResponse {
   newCash:    number;
 }
 
+// ETag cache: path → last known ETag value
+const _etagCache: Record<string, string> = {};
+
 // ── Core fetch wrapper ────────────────────────────────────────────────────────
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
   deviceId: string,
 ): Promise<T> {
-  const res = await fetch(path, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Device-ID': deviceId,
-      ...(options.headers ?? {}),
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Device-ID': deviceId,
+    ...(options.headers as Record<string, string> ?? {}),
+  };
+
+  // Send cached ETag for GET requests to enable 304 Not Modified responses
+  if (!options.method || options.method === 'GET') {
+    const cached = _etagCache[path];
+    if (cached) headers['If-None-Match'] = cached;
+  }
+
+  const res = await fetch(path, { ...options, headers });
+
+  if (res.status === 304) {
+    // Server confirmed nothing changed — caller should keep its current state
+    throw new Error('NOT_MODIFIED');
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => 'Unknown error');
     throw new Error(`API ${path} failed (${res.status}): ${text}`);
   }
+
+  // Cache the new ETag for the next request
+  const newEtag = res.headers.get('ETag');
+  if (newEtag) _etagCache[path] = newEtag;
+
   return res.json();
 }
 
