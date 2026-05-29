@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { NATIONS, CALENDAR } from '@kickstock/constants';
 import { fmt, pctOf } from '@kickstock/game-engine';
 import { useGameStore } from '@/stores/gameStore';
@@ -41,6 +42,7 @@ function Sparkline({ prices, color }: { prices: number[]; color: string }) {
 }
 
 export default function NationDetailOverlay({ nationId, onClose }: Props) {
+  const t = useTranslations('nationDetail');
   const [tradeMode, setTradeMode] = useState<TradeMode | null>(null);
 
   const prices       = useGameStore(s => s.prices);
@@ -67,7 +69,7 @@ export default function NationDetailOverlay({ nationId, onClose }: Props) {
       isWin: boolean; isDraw: boolean; isUpset: boolean;
       etRes: string | null; penWinner: string | null;
       penFor: number; penAgainst: number;
-    } }[] = [{ label: 'Départ', price: nation.p, delta: 0, matchInfo: null }];
+    } }[] = [{ label: t('initialPrice'), price: nation.p, delta: 0, matchInfo: null }];
 
     let lastP = nation.p;
     Object.entries(matchResults)

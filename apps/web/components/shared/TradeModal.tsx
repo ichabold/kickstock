@@ -1,16 +1,7 @@
 'use client';
 
-/**
- * TradeModal — calm-voice rewrite.
- *
- * Changes vs previous version:
- *   - Single radius scale using tokens
- *   - "BUY 10 SHARES" CTA echoes action + qty (reduces accidental trades)
- *   - Held count in header sub-line instead of a separate info grid
- *   - Cost is positive, gold-coloured; sign convention only on Cash After
- *   - Haptic on confirm (navigator.vibrate)
- */
 import { useState, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import type { Nation, TradeMode } from '@kickstock/types';
 import { calcTax, fmt, pctOf } from '@kickstock/game-engine';
 import { CALENDAR } from '@kickstock/constants';
@@ -24,6 +15,7 @@ interface Props {
 }
 
 export default function TradeModal({ nation, initMode, onClose }: Props) {
+  const t = useTranslations('trade');
   const [mode, setMode]   = useState<TradeMode>(initMode);
   const [qty, setQty]     = useState(1);
   const [error, setError] = useState('');
@@ -88,38 +80,38 @@ export default function TradeModal({ nation, initMode, onClose }: Props) {
           <div style={{ flex: 1 }}>
             <h2 className={styles.title}>{nation.name}</h2>
             <p className={styles.sub}>
-              Group {nation.group} · You hold {held} shares
+              {t('subtitle', { group: nation.group, held })}
             </p>
           </div>
-          <button onClick={onClose} className={styles.close} aria-label="Close">✕</button>
+          <button onClick={onClose} className={styles.close} aria-label={t('close')}>✕</button>
         </header>
 
         {isElim && (
-          <div className={styles.elimWarn}>Eliminated — buys disabled</div>
+          <div className={styles.elimWarn}>{t('eliminated')}</div>
         )}
 
-        {/* Mode segmented control */}
         <div className={styles.modeRow} role="tablist">
           <button
             role="tab"
             aria-selected={mode === 'buy'}
             className={`${styles.modeBtn} ${mode === 'buy' ? styles.modeOnBuy : ''}`}
             onClick={() => switchMode('buy')}
-          >BUY</button>
+          >{t('buy')}</button>
           <button
             role="tab"
             aria-selected={mode === 'sell'}
             className={`${styles.modeBtn} ${mode === 'sell' ? styles.modeOnSell : ''}`}
             onClick={() => switchMode('sell')}
-          >SELL</button>
+          >{t('sell')}</button>
         </div>
 
-        {/* Stepper */}
         <div className={styles.stepper}>
           <button aria-label="Decrease" onClick={() => setQty(q => Math.max(1, q - 1))}>−</button>
           <div className={styles.qty} aria-live="polite">{safeQty}</div>
           <button aria-label="Increase" onClick={() => setQty(q => Math.min(maxQty, q + 1))}>+</button>
-          <button className={styles.max} onClick={() => setQty(Math.max(1, maxQty))}>MAX {maxQty}</button>
+          <button className={styles.max} onClick={() => setQty(Math.max(1, maxQty))}>
+            {t('max', { max: maxQty })}
+          </button>
         </div>
 
         <input
@@ -129,27 +121,26 @@ export default function TradeModal({ nation, initMode, onClose }: Props) {
           max={Math.max(1, maxQty)}
           value={safeQty}
           step={1}
-          aria-label="Quantity"
+          aria-label={t('quantity')}
           onChange={e => setQty(+e.target.value)}
         />
 
-        {/* Summary */}
         <dl className={styles.summary}>
-          <SummaryRow label="Price per share" value={`${Math.round(price)} KC`} />
-          <SummaryRow label="Quantity" value={`× ${safeQty}`} />
+          <SummaryRow label={t('pricePerShare')} value={`${Math.round(price)} KC`} />
+          <SummaryRow label={t('quantity')} value={`× ${safeQty}`} />
           {mode === 'sell' && (
-            <SummaryRow label={`Tax (${isKO ? '5' : '10'}%)`} value={`${fmt(fee)} KC`} muted />
+            <SummaryRow label={isKO ? t('taxFive') : t('taxTen')} value={`${fmt(fee)} KC`} muted />
           )}
           {isCapPhase && mode === 'buy' && (
-            <SummaryRow label="Concentration after trade" value={`${concPct}% / 40%`} accent />
+            <SummaryRow label={t('concentration')} value={`${concPct}% / 40%`} accent />
           )}
           <SummaryRow
-            label={mode === 'buy' ? "You'll pay" : "You'll receive"}
+            label={mode === 'buy' ? t('youllPay') : t('youllReceive')}
             value={`${fmt(total)} KC`}
             highlight
           />
           <SummaryRow
-            label="Cash after"
+            label={t('cashAfter')}
             value={`${fmt(Math.max(0, cashAfter))} KC`}
             tone={cashAfter < 0 ? 'loss' : undefined}
           />
@@ -162,9 +153,9 @@ export default function TradeModal({ nation, initMode, onClose }: Props) {
           disabled={ctaDisabled}
           onClick={confirm}
         >
-          {mode === 'buy' ? `BUY ${safeQty} SHARES` : `SELL ${safeQty} SHARES`}
+          {mode === 'buy' ? t('ctaBuy', { qty: safeQty }) : t('ctaSell', { qty: safeQty })}
         </button>
-        <button className={styles.cancel} onClick={onClose}>Cancel</button>
+        <button className={styles.cancel} onClick={onClose}>{t('cancel')}</button>
       </div>
     </div>
   );

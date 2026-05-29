@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { useAuth } from '@/hooks/useAuth';
 import { useGameStore } from '@/stores/gameStore';
 import { fmt } from '@kickstock/game-engine';
@@ -97,6 +98,7 @@ export default function WelcomeModal() {
 // ─── Migration confirmation ───────────────────────────────────────────────────
 
 function MigrationStep({ onNext }: { onNext: () => void }) {
+  const t = useTranslations('auth.welcome');
   const cash      = useGameStore(s => s.cash);
   const portfolio = useGameStore(s => s.portfolio);
   const prices    = useGameStore(s => s.prices);
@@ -109,17 +111,17 @@ function MigrationStep({ onNext }: { onNext: () => void }) {
   return (
     <>
       <div style={s.checkmark}>✓</div>
-      <div style={s.title}>COMPTE CRÉÉ</div>
-      <div style={s.subtitle}>Ta progression et ton pseudo ont été migrés</div>
+      <div style={s.title}>{t('accountCreatedTitle')}</div>
+      <div style={s.subtitle}>{t('accountCreatedSubtitle')}</div>
 
       <div style={s.statsBox}>
-        <StatRow label="Valeur totale"   value={`${fmt(totalVal)} KC`} />
-        <StatRow label="Positions"       value={`${positions} nation${positions > 1 ? 's' : ''}`} />
-        {bestScore && <StatRow label="Meilleur score" value={`${fmt(bestScore)} KC`} />}
+        <StatRow label={t('totalValue')}  value={`${fmt(totalVal)} KC`} />
+        <StatRow label="Positions"        value={t('positions', { count: positions })} />
+        {bestScore && <StatRow label={t('bestScore')} value={`${fmt(bestScore)} KC`} />}
       </div>
 
       <button onClick={onNext} style={s.btn}>
-        CONTINUER →
+        {t('continueButton')}
       </button>
     </>
   );
@@ -137,6 +139,7 @@ function StatRow({ label, value }: { label: string; value: string }) {
 // ─── Username prompt (new Google user, no prior guest pseudo) ─────────────────
 
 function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo: string | null }) {
+  const t = useTranslations('auth.welcome');
   const { user } = useAuth();
 
   const initialPseudo = (() => {
@@ -183,7 +186,7 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
         if (!chkData.available) {
           setState('taken');
           setSuggestion(chkData.suggestion ?? null);
-          setError('Ce pseudo est déjà pris.');
+          setError(t('pseudoTaken'));
           setSaving(false);
           return;
         }
@@ -200,7 +203,7 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
 
     if (!res.ok) {
       setState(data.error === 'taken' ? 'taken' : 'idle');
-      setError(data.error === 'taken' ? 'Ce pseudo est déjà pris.' : 'Erreur, réessaie.');
+      setError(data.error === 'taken' ? t('pseudoTaken') : t('pseudoTaken'));
       setSaving(false);
       return;
     }
@@ -212,8 +215,8 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
 
   return (
     <>
-      <div style={s.title}>CHOISIS TON PSEUDO</div>
-      <div style={s.subtitle}>Visible dans le classement</div>
+      <div style={s.title}>{t('choosePseudoTitle')}</div>
+      <div style={s.subtitle}>{t('choosePseudoSubtitle')}</div>
 
       <form onSubmit={handleSave} style={{ width: '100%' }}>
         <div style={{ position: 'relative', marginBottom: 8 }}>
@@ -222,7 +225,7 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
             value={pseudo}
             onChange={e => { setPseudo(e.target.value); setState('idle'); setSuggestion(null); setError(''); }}
             onBlur={() => { if (pseudo.trim()) checkAvailability(pseudo.trim()); }}
-            placeholder="Ton pseudo"
+            placeholder={t('pseudoPlaceholder')}
             maxLength={20}
             autoCapitalize="off"
             autoCorrect="off"
@@ -242,12 +245,12 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
 
         {state === 'taken' && (
           <div style={s.errorBox}>
-            Pseudo déjà pris.{suggestion && (
+            {t('pseudoTaken')}{suggestion && (
               <button type="button"
                 onClick={() => { setPseudo(suggestion); setState('idle'); setSuggestion(null); setTimeout(() => checkAvailability(suggestion), 0); }}
                 style={s.suggestionBtn}
               >
-                {' '}Utiliser « {suggestion} »
+                {' '}{t('useSuggestion', { suggestion })}
               </button>
             )}
           </div>
@@ -259,12 +262,12 @@ function UsernameStep({ onDone, guestPseudo }: { onDone: () => void; guestPseudo
           disabled={!isSubmittable || saving}
           style={{ ...s.btn, marginTop: 12, opacity: !isSubmittable || saving ? 0.45 : 1 }}
         >
-          {saving ? 'SAUVEGARDE…' : 'CONFIRMER →'}
+          {saving ? t('savingButton') : t('confirmButton')}
         </button>
       </form>
 
       <div style={{ fontSize: 10, color: 'var(--dim)', textAlign: 'center', marginTop: 4 }}>
-        Ce pseudo apparaîtra dans le classement public.
+        {t('pseudoInfo')}
       </div>
     </>
   );

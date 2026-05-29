@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { CALENDAR, NATIONS } from '@kickstock/constants';
 import { useGameStore, fmt, buildMatchesForCurrentDay } from '@/stores/gameStore';
 import { SimulateButton } from '@/components/mechanics';
@@ -17,6 +18,7 @@ interface Props {
 type View = 'pre' | 'animating' | 'done';
 
 export default function SimulateTab({ onDone }: Props) {
+  const t = useTranslations('simulate');
   const [view,    setView]    = useState<View>('pre');
   const [results, setResults] = useState<StoredMatchResult[]>([]);
 
@@ -39,8 +41,8 @@ export default function SimulateTab({ onDone }: Props) {
     return (
       <div className={styles.wrap}>
         <div className={styles.trophy}>🏆</div>
-        <div className={styles.title}>TOURNOI TERMINÉ</div>
-        <button className={styles.resetBtn} onClick={resetGame}>NOUVELLE PARTIE</button>
+        <div className={styles.title}>{t('tournamentEndedTitle')}</div>
+        <button className={styles.resetBtn} onClick={resetGame}>{t('newGameButton')}</button>
       </div>
     );
   }
@@ -75,13 +77,13 @@ export default function SimulateTab({ onDone }: Props) {
                 <span className={styles.rScore}>
                   {r.scoreA}–{r.scoreB}
                   {r.penWinner && <span className={styles.rExtra}> ({r.penA}–{r.penB} P)</span>}
-                  {r.etRes && !r.penWinner && <span className={styles.rExtra}> AET</span>}
+                  {r.etRes && !r.penWinner && <span className={styles.rExtra}> {t('aet')}</span>}
                 </span>
                 <span className={styles.rTeam} style={{ color: r.res === 'B' ? 'var(--gold)' : 'var(--muted)' }}>
                   {nB?.flag} {nB?.name?.toUpperCase()}
                 </span>
-                {r.elimId && <span className={styles.elimNote}>💀 {gN(r.elimId)?.name?.toUpperCase()} ÉLIMINÉ</span>}
-                {r.isUpset && <span className={styles.upsetNote}>🚀 UPSET!</span>}
+                {r.elimId && <span className={styles.elimNote}>{t('eliminated', { nation: gN(r.elimId)?.name?.toUpperCase() ?? r.elimId })}</span>}
+                {r.isUpset && <span className={styles.upsetNote}>{t('upset')}</span>}
               </div>
             );
           })}
@@ -89,7 +91,7 @@ export default function SimulateTab({ onDone }: Props) {
 
         {divResults.length > 0 && (
           <div className={styles.divSection}>
-            <div className={styles.divTitle}>🎁 DIVIDENDES REÇUS</div>
+            <div className={styles.divTitle}>{t('dividendsReceived')}</div>
             {divResults.map((r, i) => (
               <div key={i} className={styles.divRow}>
                 <span>{gN(r.winnerId ?? r.a)?.flag} {gN(r.winnerId ?? r.a)?.name?.toUpperCase()}</span>
@@ -100,7 +102,7 @@ export default function SimulateTab({ onDone }: Props) {
         )}
 
         <button className={styles.doneBtn} onClick={() => { setView('pre'); onDone(); }}>
-          VOIR LE CALENDRIER →
+          {t('viewSchedule')}
         </button>
       </div>
     );
@@ -114,7 +116,7 @@ export default function SimulateTab({ onDone }: Props) {
 
       {exposure > 0 && (
         <div className={styles.exposureBar}>
-          <span className={styles.expLbl}>⚡ EXPOSITION</span>
+          <span className={styles.expLbl}>{t('exposure')}</span>
           <span className={styles.expVal}>{fmt(exposure)} KC</span>
         </div>
       )}
@@ -130,22 +132,21 @@ export default function SimulateTab({ onDone }: Props) {
               <div key={i} className={`${styles.matchPreview} ${hasA || hasB ? styles.exposed : ''}`}>
                 <span className={styles.mpFlag}>{nA?.flag}</span>
                 <span className={styles.mpName}>{nA?.name?.toUpperCase()}</span>
-                <span className={styles.mpVs}>VS</span>
+                <span className={styles.mpVs}>{t('vs')}</span>
                 <span className={styles.mpName}>{nB?.name?.toUpperCase()}</span>
                 <span className={styles.mpFlag}>{nB?.flag}</span>
-                {m.venue && <span className={styles.mpVenue}>📍 {m.venue}</span>}
+                {m.venue && <span className={styles.mpVenue}>{t('venue', { venue: m.venue })}</span>}
               </div>
             );
           })}
         </div>
       ) : (
-        <div className={styles.matchCount}>Phase KO — matchs à venir</div>
+        <div className={styles.matchCount}>{t('koUpcoming')}</div>
       )}
 
-      {/* SimulateButton — mechanic atom, same advanceDay() logic as BrowserShell topbar */}
       <SimulateButton
         className={styles.playBtn}
-        label="⚡ SIMULER CE JOUR"
+        label={t('simulateButton')}
         onResults={res => { setResults(res); setView('animating'); }}
         onNoResults={() => setView('pre')}
       />

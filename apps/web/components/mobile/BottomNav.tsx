@@ -1,24 +1,8 @@
 'use client';
 
-/**
- * BottomNav — mobile bottom navigation with SVG icons and FAB-style PLAY button.
- * Replaces the emoji-based nav block in MobileShell.tsx.
- */
+import { useTranslations } from 'next-intl';
 import type { TabId } from '@kickstock/types';
 import styles from './BottomNav.module.css';
-
-interface Tab {
-  id: TabId;
-  label: string;
-  icon: JSX.Element;
-}
-
-const TABS: Tab[] = [
-  { id: 'market',    label: 'Market',   icon: <IconChart />     },
-  { id: 'schedule',  label: 'Fixtures', icon: <IconCalendar />  },
-  { id: 'portfolio', label: 'Portfolio', icon: <IconBriefcase /> },
-  { id: 'standings', label: 'Table',    icon: <IconTable />     },
-];
 
 interface Props {
   active: TabId;
@@ -27,12 +11,21 @@ interface Props {
 }
 
 export default function BottomNav({ active, onChange, onPlay }: Props) {
+  const t = useTranslations('nav');
+
+  const TABS = [
+    { id: 'market'    as TabId, label: t('market'),    icon: <IconChart />     },
+    { id: 'schedule'  as TabId, label: t('fixtures'),  icon: <IconCalendar />  },
+    { id: 'portfolio' as TabId, label: t('portfolio'), icon: <IconBriefcase /> },
+    { id: 'standings' as TabId, label: t('table'),     icon: <IconTable />     },
+  ];
+
   const left  = TABS.slice(0, 2);
   const right = TABS.slice(2);
   return (
     <nav className={styles.nav} aria-label="Primary">
-      {left.map(t => (
-        <NavBtn key={t.id} tab={t} active={active === t.id} onClick={() => onChange(t.id)} />
+      {left.map(tab => (
+        <NavBtn key={tab.id} tab={tab} active={active === tab.id} onClick={() => onChange(tab.id)} />
       ))}
       <button
         className={styles.play}
@@ -42,14 +35,14 @@ export default function BottomNav({ active, onChange, onPlay }: Props) {
       >
         <IconPlay />
       </button>
-      {right.map(t => (
-        <NavBtn key={t.id} tab={t} active={active === t.id} onClick={() => onChange(t.id)} />
+      {right.map(tab => (
+        <NavBtn key={tab.id} tab={tab} active={active === tab.id} onClick={() => onChange(tab.id)} />
       ))}
     </nav>
   );
 }
 
-function NavBtn({ tab, active, onClick }: { tab: Tab; active: boolean; onClick: () => void }) {
+function NavBtn({ tab, active, onClick }: { tab: { id: TabId; label: string; icon: JSX.Element }; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"

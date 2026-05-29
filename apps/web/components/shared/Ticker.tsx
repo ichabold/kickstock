@@ -1,12 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { NATIONS } from '@kickstock/constants';
 import { useGameStore } from '@/stores/gameStore';
 import NationDetailOverlay from './NationDetailOverlay';
 import styles from './Ticker.module.css';
 
 export default function Ticker() {
+  const t = useTranslations('ticker');
   const prices    = useGameStore(s => s.prices);
   const portfolio = useGameStore(s => s.portfolio);
   const [nationId, setNationId] = useState<string | null>(null);
@@ -23,7 +25,7 @@ export default function Ticker() {
 
   return (
     <>
-      <div className={styles.wrap} aria-label="Cours en direct">
+      <div className={styles.wrap} aria-label={t('ariaLabel')}>
         <div className={styles.ticker}>
           {doubled.map((n, i) => {
             const p    = prices[n.id] ?? n.p;

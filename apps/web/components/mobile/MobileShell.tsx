@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { useGameStore, fmt } from '@/stores/gameStore';
 import { useValidateMechanics } from '@/hooks/useValidateMechanics';
 import { usePortfolioTotals } from '@/components/mechanics';
@@ -22,6 +23,7 @@ import type { TabId } from '@kickstock/types';
 import { CALENDAR } from '@kickstock/constants';
 
 export default function MobileShell() {
+  const t = useTranslations('shell');
   const [tab, setTab]         = useState<TabId>('schedule');
   const [showTut, setShowTut] = useState(false);
   const { user: mobileUser }  = useAuth();
@@ -31,25 +33,22 @@ export default function MobileShell() {
     return () => useGameStore.getState().stopSync();
   }, []);
 
-  // Auto-open tutorial on first guest creation — P0 fix
   useEffect(() => {
     function handleShowTut() {
       localStorage.setItem('kickstock_seen_tutorial', '1');
-      setTab('market'); // ensure NationCards are visible for coach marks
+      setTab('market');
       setShowTut(true);
     }
     window.addEventListener('kickstock:show-tutorial', handleShowTut);
     return () => window.removeEventListener('kickstock:show-tutorial', handleShowTut);
   }, []);
 
-  // Cross-device sync: load server state when a registered user logs in
   const syncUser = useGameStore(s => (s as { syncFromServer?: () => Promise<void> }).syncFromServer);
   useEffect(() => {
     if (mobileUser) syncUser?.();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mobileUser?.id]);
 
-  // Pattern 3 — validate at mount that this shell covers all required mechanics
   useValidateMechanics({
     canViewNationPrice: true,
     canBuy:             true,
@@ -62,7 +61,6 @@ export default function MobileShell() {
     canViewSchedule:    true,
   }, 'MobileShell');
 
-  // usePortfolioTotals — mechanic hook, same formula as BrowserShell topbar
   const { cash, totalVal: totVal, pl } = usePortfolioTotals();
 
   const dayIndex = useGameStore(s => s.dayIndex);
@@ -79,11 +77,11 @@ export default function MobileShell() {
         <span className={styles.logo}>KICKSTOCK</span>
         <div className={styles.stats}>
           <div className={styles.stat} data-coach="cash-stat">
-            <div className={styles.statLbl}>CASH</div>
+            <div className={styles.statLbl}>{t('cash')}</div>
             <div className={styles.statVal}>{fmt(cash)}</div>
           </div>
           <div className={styles.stat}>
-            <div className={styles.statLbl}>TOTAL</div>
+            <div className={styles.statLbl}>{t('total')}</div>
             <div className={styles.statVal} style={{ color: pl >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
               {fmt(totVal)}
             </div>
@@ -98,7 +96,7 @@ export default function MobileShell() {
       <Ticker />
 
       {/* TOURNAMENT PROGRESS */}
-      <div className={styles.progress} title={`Journée ${dayIndex + 1} / ${totalDays}`}>
+      <div className={styles.progress} title={`${dayIndex + 1} / ${totalDays}`}>
         <div className={styles.progressFill} style={{ width: `${progressPct}%` }} />
       </div>
 
@@ -107,8 +105,8 @@ export default function MobileShell() {
         <span className={styles.statusDay}>
           {!day
             ? champion
-              ? `🏆 FIN · ${champion}`
-              : '🏆 TOURNOI TERMINÉ'
+              ? t('tournamentEndedChampion', { champion })
+              : t('tournamentEnded')
             : day.label}
         </span>
         {day && (

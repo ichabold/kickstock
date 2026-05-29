@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { CALENDAR, NATIONS } from '@kickstock/constants';
 import { useGameStore, pctOf, buildMatchesForCurrentDay } from '@/stores/gameStore';
 import type { StoredMatchResult } from '@kickstock/types';
@@ -11,6 +12,7 @@ import styles from './ScheduleTab.module.css';
 const gN = (id: string) => NATIONS.find(n => n.id === id);
 
 export default function ScheduleTab() {
+  const t = useTranslations('schedule');
   const [matchDetail, setMatchDetail] = useState<{ result: StoredMatchResult; dayLabel: string } | null>(null);
   const [nationId,    setNationId]    = useState<string | null>(null);
 
@@ -40,8 +42,8 @@ export default function ScheduleTab() {
               <div className={styles.dayHeader}>
                 <span className={styles.dayLabel}>{isCurrent ? '▶ ' : ''}{day.label}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {isPast && played && <span style={{ fontSize: 8, color: 'var(--gain)', fontWeight: 700 }}>✓ JOUÉ</span>}
-                  {isCurrent && <span style={{ fontSize: 8, color: 'var(--gold)', fontWeight: 700 }}>PROCHAIN</span>}
+                  {isPast && played && <span style={{ fontSize: 8, color: 'var(--gain)', fontWeight: 700 }}>{t('played')}</span>}
+                  {isCurrent && <span style={{ fontSize: 8, color: 'var(--gold)', fontWeight: 700 }}>{t('next')}</span>}
                   <span className={`${styles.phase} ${day.isKO ? styles.phaseKO : styles.phaseGroup}`}>
                     {day.phase}
                   </span>
@@ -100,7 +102,7 @@ export default function ScheduleTab() {
                           {sA}–{sB}
                         </button>
                         {res.penWinner && <div style={{ fontSize: 7, color: 'var(--muted)' }}>P {res.penA}–{res.penB}</div>}
-                        {res.etRes && !res.penWinner && <div style={{ fontSize: 7, color: 'var(--gold)' }}>AET</div>}
+                        {res.etRes && !res.penWinner && <div style={{ fontSize: 7, color: 'var(--gold)' }}>{t('aet')}</div>}
                         <div style={{ fontSize: 8, fontFamily: 'var(--font-mono)' }}>
                           <span style={{ color: pctA >= 0 ? 'var(--gain)' : 'var(--loss)' }}>{pctA >= 0 ? '▲' : '▼'}{Math.abs(pctA)}%</span>
                           {' / '}
@@ -116,7 +118,7 @@ export default function ScheduleTab() {
                 );
               }) : (
                 <div className={styles.dynamic}>
-                  {day.isKO ? '🎯 Matchs déterminés dynamiquement' : 'Matchs à venir'}
+                  {day.isKO ? t('dynamicKO') : t('upcoming')}
                 </div>
               )}
             </div>

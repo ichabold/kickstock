@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { getDeviceId } from '@/lib/device';
 import { getPseudo, setPseudo, isValidPseudoFormat, saveOAuthPending } from '@/lib/pseudo';
@@ -16,6 +17,8 @@ type PseudoState = 'idle' | 'checking' | 'available' | 'taken' | 'invalid';
 const TUT_KEY = 'kickstock_seen_tutorial';
 
 export default function GuestModal({ onDone }: Props) {
+  const t = useTranslations('auth.guest');
+  const tc = useTranslations('common');
   const [visible, setVisible]       = useState(false);
   const [pseudo,  setPseudoVal]     = useState('');
   const [state,   setPseudoState]   = useState<PseudoState>('idle');
@@ -126,7 +129,7 @@ export default function GuestModal({ onDone }: Props) {
     setSubmitError(null);
 
     if (state === 'taken') {
-      setSubmitError('Ce pseudo est déjà pris.');
+      setSubmitError(t('alreadyTaken'));
       setSubmitting(false);
       return;
     }
@@ -137,7 +140,7 @@ export default function GuestModal({ onDone }: Props) {
         if (!chkData.available) {
           setPseudoState('taken');
           setSuggestion(chkData.suggestion ?? null);
-          setSubmitError('Ce pseudo est déjà pris.');
+          setSubmitError(t('alreadyTaken'));
           setSubmitting(false);
           return;
         }
@@ -148,9 +151,8 @@ export default function GuestModal({ onDone }: Props) {
     }
 
     try {
-      // If Turnstile is enabled but token isn't ready yet, wait briefly
       if (siteKey && !cfToken) {
-        setSubmitError('Vérification en cours, réessaie dans un instant.');
+        setSubmitError(t('turnstileError'));
         setSubmitting(false);
         return;
       }
@@ -176,12 +178,12 @@ export default function GuestModal({ onDone }: Props) {
         onDone();
       } else if (data.error === 'taken') {
         setPseudoState('taken');
-        setSubmitError('Ce pseudo est déjà pris.');
+        setSubmitError(t('alreadyTaken'));
       } else {
-        setSubmitError('Erreur réseau, réessaie.');
+        setSubmitError(tc('networkError'));
       }
     } catch {
-      setSubmitError('Erreur réseau, réessaie.');
+      setSubmitError(tc('networkError'));
     } finally {
       setSubmitting(false);
     }
@@ -207,11 +209,11 @@ export default function GuestModal({ onDone }: Props) {
           <span style={s.logoIcon}>⚽</span>
           <span style={s.logoText}>KICKSTOCK</span>
         </div>
-        <div style={s.subtitle}>WORLD CUP 2026 · TRADING GAME</div>
+        <div style={s.subtitle}>{t('subtitle')}</div>
 
         {/* ── Guest block (primary) ────────────────────────────────── */}
         <div style={s.block}>
-          <div style={s.blockTitle}>CHOISIS TON PSEUDO</div>
+          <div style={s.blockTitle}>{t('title')}</div>
           <form onSubmit={handleSubmit} style={s.form}>
             <div style={s.inputWrap}>
               <input
@@ -219,7 +221,7 @@ export default function GuestModal({ onDone }: Props) {
                 value={pseudo}
                 onChange={handleChange}
                 onBlur={handleBlur}
-                placeholder="Ton pseudo (3–20 caractères)"
+                placeholder={t('placeholder')}
                 maxLength={20}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -239,14 +241,14 @@ export default function GuestModal({ onDone }: Props) {
 
             {state === 'invalid' && pseudo.length > 0 && (
               <div style={s.error}>
-                3 à 20 caractères, lettres, chiffres, _ et - uniquement.
+                {t('validationError')}
               </div>
             )}
             {state === 'taken' && (
               <div style={s.error}>
-                Pseudo déjà utilisé.{suggestion && (
+                {t('alreadyTaken')}{suggestion && (
                   <> <button type="button" onClick={useSuggestion} style={s.suggestionBtn}>
-                    Utiliser « {suggestion} »
+                    {t('useSuggestion', { suggestion })}
                   </button></>
                 )}
               </div>
@@ -257,14 +259,14 @@ export default function GuestModal({ onDone }: Props) {
             <div ref={turnstileRef} style={{ display: 'none' }} />
             {siteKey && (
               <div style={s.turnstileNotice}>
-                Ce site est protégé par Cloudflare Turnstile.{' '}
+                {t('turnstileNotice')}{' '}
                 <a
                   href="https://www.cloudflare.com/privacypolicy/"
                   target="_blank"
                   rel="noopener noreferrer"
                   style={s.turnstileLink}
                 >
-                  Politique de confidentialité
+                  {t('privacyPolicy')}
                 </a>
               </div>
             )}
@@ -274,7 +276,7 @@ export default function GuestModal({ onDone }: Props) {
               disabled={!isSubmittable || submitting}
               style={{ ...s.btn, opacity: !isSubmittable || submitting ? 0.45 : 1 }}
             >
-              {submitting ? 'CHARGEMENT…' : 'JOUER MAINTENANT'}
+              {submitting ? t('loadingButton') : t('submitButton')}
             </button>
           </form>
         </div>
@@ -282,7 +284,7 @@ export default function GuestModal({ onDone }: Props) {
         {/* ── Divider ──────────────────────────────────────────────── */}
         <div style={s.dividerRow}>
           <div style={s.dividerLine} />
-          <span style={s.dividerText}>ou</span>
+          <span style={s.dividerText}>{tc('or')}</span>
           <div style={s.dividerLine} />
         </div>
 
@@ -294,6 +296,9 @@ export default function GuestModal({ onDone }: Props) {
 }
 
 function AuthButtons() {
+  const t = useTranslations('auth.guest');
+  const te = useTranslations('auth.emailModal');
+  const tc = useTranslations('common');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleError,   setGoogleError]   = useState('');
   const [emailOpen,     setEmailOpen]     = useState(false);
@@ -310,7 +315,7 @@ function AuthButtons() {
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (error) {
-      setGoogleError('Connexion Google échouée. Réessaie.');
+      setGoogleError(te('googleError'));
       setGoogleLoading(false);
     }
   }
@@ -319,12 +324,12 @@ function AuthButtons() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {/* Login link first — returning users find it immediately */}
       <div style={s.loginRow}>
-        Déjà un compte ?{' '}
+        {t('alreadyAccount')}{' '}
         <button
           onClick={() => { setEmailView('signin'); setEmailOpen(true); }}
           style={s.loginLink}
         >
-          SE CONNECTER
+          {t('signIn')}
         </button>
       </div>
 
@@ -334,7 +339,7 @@ function AuthButtons() {
         style={{ ...s.oauthBtn, opacity: googleLoading ? 0.6 : 1 }}
       >
         <span style={s.oauthIcon}>G</span>
-        {googleLoading ? 'Redirection…' : 'Continuer avec Google'}
+        {googleLoading ? tc('redirecting') : t('continueGoogle')}
       </button>
       {googleError && <div style={s.error}>{googleError}</div>}
 
@@ -343,7 +348,7 @@ function AuthButtons() {
         style={{ ...s.oauthBtn, fontSize: 12, color: 'var(--muted)' }}
       >
         <span style={s.oauthIcon}>✉</span>
-        Créer un compte par email
+        {t('createEmailAccount')}
       </button>
 
       {emailOpen && (

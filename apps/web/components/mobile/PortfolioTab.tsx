@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { NATIONS } from '@kickstock/constants';
 import { fmt, pctOf } from '@kickstock/game-engine';
 import { useGameStore } from '@/stores/gameStore';
@@ -11,10 +12,10 @@ import type { Nation, TradeMode } from '@kickstock/types';
 import styles from './PortfolioTab.module.css';
 
 export default function PortfolioTab() {
+  const t = useTranslations('portfolio');
   const [modal,    setModal]    = useState<{ nation: Nation; mode: TradeMode } | null>(null);
   const [nationId, setNationId] = useState<string | null>(null);
 
-  // usePortfolioTotals — mechanic hook, same formula as BrowserShell PortfolioView
   const { cash, portVal, invested, totalVal: totVal, pl: totalPL, plPct: totalPLPct, bestScore } = usePortfolioTotals();
 
   const prices    = useGameStore(s => s.prices);
@@ -44,7 +45,7 @@ export default function PortfolioTab() {
     <div>
       {/* ── Hero ─────────────────────────────────────────────────────────── */}
       <div className={styles.hero}>
-        <div className={styles.heroLbl}>VALEUR TOTALE</div>
+        <div className={styles.heroLbl}>{t('totalValue')}</div>
         <div className={styles.heroVal}>{fmt(totVal)} KC</div>
         {invested > 0 && (
           <div className={`${styles.heroPL} ${totalPL >= 0 ? styles.gain : styles.loss}`}>
@@ -57,15 +58,15 @@ export default function PortfolioTab() {
       {/* ── Stats row ────────────────────────────────────────────────────── */}
       <div className={styles.statsRow}>
         <div className={styles.statBox}>
-          <div className={styles.statLbl}>CASH</div>
+          <div className={styles.statLbl}>{t('cash')}</div>
           <div className={styles.statVal}>{fmt(cash)}</div>
         </div>
         <div className={styles.statBox}>
-          <div className={styles.statLbl}>INVESTI</div>
+          <div className={styles.statLbl}>{t('invested')}</div>
           <div className={styles.statVal}>{fmt(invested)}</div>
         </div>
         <div className={`${styles.statBox} ${totalPL >= 0 ? styles.statGain : styles.statLoss}`}>
-          <div className={styles.statLbl}>P&amp;L</div>
+          <div className={styles.statLbl}>{t('pnl')}</div>
           <div className={`${styles.statVal} ${totalPL >= 0 ? styles.gain : styles.loss}`}>
             {totalPL >= 0 ? '+' : ''}{fmt(totalPL)}
           </div>
@@ -74,23 +75,23 @@ export default function PortfolioTab() {
 
       {/* ── Best score ───────────────────────────────────────────────────── */}
       {bestScore !== null && (
-        <div className={styles.best}>🏆 MEILLEUR SCORE: {fmt(bestScore)} KC</div>
+        <div className={styles.best}>{t('bestScore', { score: fmt(bestScore) })}</div>
       )}
 
-      {/* ── Eliminated notice (liquidation is automatic server-side) ──────── */}
+      {/* ── Eliminated notice ─────────────────────────────────────────────── */}
       {hasElimHeld && (
         <div className={styles.liquidateBtn} style={{ cursor: 'default' }}>
-          💀 Nations éliminées — liquidation automatique
+          {t('eliminatedNotice')}
         </div>
       )}
 
       {/* ── Holdings ─────────────────────────────────────────────────────── */}
       {holdings.length === 0 ? (
         <div className={styles.empty}>
-          <div style={{ fontSize: 40 }}>📊</div>
-          <div>Portefeuille vide</div>
+          <div style={{ fontSize: 40 }}>{t('emptyIcon')}</div>
+          <div>{t('emptyTitle')}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-            Achetez des actions dans l&apos;onglet MARKET
+            {t('emptyHint')}
           </div>
         </div>
       ) : (
@@ -106,7 +107,7 @@ export default function PortfolioTab() {
                 <div className={styles.holdInfo}>
                   <div className={styles.holdName}>
                     {h.nation?.name?.toUpperCase()}
-                    {h.isElim && <span className={styles.elimBadge}>💀 ÉLIMINÉ</span>}
+                    {h.isElim && <span className={styles.elimBadge}>{t('elimBadge')}</span>}
                   </div>
                   <div className={styles.holdSub}>
                     {h.qty}x ·{' '}
@@ -127,7 +128,7 @@ export default function PortfolioTab() {
                   </div>
                 </div>
               </div>
-              <div className={styles.sellHint}>Appuyer pour détails →</div>
+              <div className={styles.sellHint}>{t('pressDetails')}</div>
             </div>
           ))}
         </div>
@@ -136,17 +137,17 @@ export default function PortfolioTab() {
       {/* ── Trade history ────────────────────────────────────────────────── */}
       {txLog.length > 0 && (
         <div className={styles.txSection}>
-          <div className={styles.txTitle}>HISTORIQUE DES TRANSACTIONS</div>
+          <div className={styles.txTitle}>{t('txHistory')}</div>
           {txLog.slice(0, 20).map((tx, i) => (
             <div key={i} className={styles.txRow}>
               <span className={`${styles.txDir} ${tx.dir === 'buy' ? styles.txBuy : styles.txSell}`}>
-                {tx.dir === 'buy' ? 'ACH' : 'VTE'}
+                {tx.dir === 'buy' ? t('txBuy') : t('txSell')}
               </span>
               <span className={styles.txFlag}>{tx.flag}</span>
               <span className={styles.txName}>{tx.name}</span>
               <span className={styles.txQty}>{tx.qty}x</span>
               <span className={styles.txPrice}>{fmt(tx.price)} KC</span>
-              <span className={styles.txDay}>J{tx.day + 1}</span>
+              <span className={styles.txDay}>{t('txDay', { day: tx.day + 1 })}</span>
             </div>
           ))}
         </div>

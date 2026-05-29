@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { useTranslations } from 'next-intl';
 import { NATIONS, GROUPS } from '@kickstock/constants';
 import NationCard from '@/components/shared/NationCard';
 import TradeModal from '@/components/shared/TradeModal';
@@ -10,6 +11,7 @@ import { useGameStore } from '@/stores/gameStore';
 import styles from './MarketTab.module.css';
 
 export default function MarketTab() {
+  const t = useTranslations('market');
   const [filter,   setFilter]   = useState('');
   const [group,    setGroup]    = useState('ALL');
   const [sortBy,   setSortBy]   = useState<SortBy>('default');
@@ -24,11 +26,11 @@ export default function MarketTab() {
   const isFirstRun = Object.values(portfolio).every(q => q === 0) && txLog.length === 0;
 
   const SORTS: { id: SortBy; label: string }[] = [
-    { id: 'default',    label: 'DEFAULT'  },
-    { id: 'price_desc', label: 'PRIX ▼'  },
-    { id: 'price_asc',  label: 'PRIX ▲'  },
-    { id: 'change',     label: 'PERF %'  },
-    { id: 'held',       label: 'PORTEFEUILLE' },
+    { id: 'default',    label: t('sortDefault')   },
+    { id: 'price_desc', label: t('sortPriceDesc') },
+    { id: 'price_asc',  label: t('sortPriceAsc')  },
+    { id: 'change',     label: t('sortPerf')      },
+    { id: 'held',       label: t('sortPortfolio') },
   ];
 
   const filtered = useMemo(() => {
@@ -56,17 +58,14 @@ export default function MarketTab() {
       <div>
         {isFirstRun && (
           <div className={styles.onboarding}>
-            <div className={styles.onboardingTitle}>Bienvenue sur KickStock ⚽</div>
-            <div className={styles.onboardingBody}>
-              Tu démarres avec <strong>10 000 KC</strong>. Achète des actions sur les nations que tu penses
-              les plus fortes — leur cours monte quand elles gagnent.
-            </div>
+            <div className={styles.onboardingTitle}>{t('onboardingTitle')}</div>
+            <div className={styles.onboardingBody}>{t('onboardingText')}</div>
           </div>
         )}
         <div className={styles.filters}>
           <input
             className={styles.search}
-            placeholder="Rechercher…"
+            placeholder={t('searchPlaceholder')}
             value={filter}
             onChange={e => setFilter(e.target.value)}
           />

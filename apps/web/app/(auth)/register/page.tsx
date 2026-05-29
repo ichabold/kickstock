@@ -4,12 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 export default function RegisterPage() {
   const router   = useRouter();
   const supabase = createClient();
+  const t        = useTranslations('auth.register');
 
   const [username, setUsername] = useState('');
   const [email,    setEmail]    = useState('');
@@ -23,7 +25,7 @@ export default function RegisterPage() {
     setError(''); setLoading(true);
 
     if (username.length < 3) {
-      setError('Le pseudo doit faire au moins 3 caractères');
+      setError(t('pseudoTooShort'));
       setLoading(false);
       return;
     }
@@ -53,12 +55,12 @@ export default function RegisterPage() {
           <span style={styles.logoIcon}>⚽</span>
           <span style={styles.logoText}>KICKSTOCK</span>
         </div>
-        <div style={styles.subtitle}>WORLD CUP 2026 · TRADING GAME</div>
+        <div style={styles.subtitle}>{t('subtitle')}</div>
 
-        <h1 style={styles.title}>CRÉER UN COMPTE</h1>
+        <h1 style={styles.title}>{t('title')}</h1>
 
         <form onSubmit={handleRegister} style={styles.form}>
-          <label style={styles.label}>PSEUDO *</label>
+          <label style={styles.label}>{t('pseudoLabel')}</label>
           <input
             type="text"
             value={username}
@@ -69,20 +71,20 @@ export default function RegisterPage() {
             placeholder="GoldenBoot99"
             style={styles.input}
           />
-          <div style={styles.hint}>3–20 caractères, sans espaces</div>
+          <div style={styles.hint}>{t('pseudoHint')}</div>
 
-          <label style={styles.label}>EMAIL *</label>
+          <label style={styles.label}>{t('emailLabel')}</label>
           <input
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
             autoComplete="email"
-            placeholder="joueur@email.com"
+            placeholder="player@email.com"
             style={styles.input}
           />
 
-          <label style={styles.label}>MOT DE PASSE *</label>
+          <label style={styles.label}>{t('passwordLabel')}</label>
           <input
             type="password"
             value={password}
@@ -90,37 +92,37 @@ export default function RegisterPage() {
             required
             minLength={8}
             autoComplete="new-password"
-            placeholder="Min. 8 caractères"
+            placeholder={t('passwordHint')}
             style={styles.input}
           />
 
-          <label style={styles.label}>PAYS (optionnel)</label>
+          <label style={styles.label}>{t('countryLabel')}</label>
           <input
             type="text"
             value={country}
             onChange={e => setCountry(e.target.value)}
-            placeholder="🇫🇷 France"
+            placeholder={t('countryPlaceholder')}
             maxLength={30}
             style={styles.input}
           />
-          <div style={styles.hint}>Pour le classement par pays</div>
+          <div style={styles.hint}>{t('countryHint')}</div>
 
           {error && <div style={styles.error}>{error}</div>}
 
           <button type="submit" disabled={loading} style={styles.btn}>
-            {loading ? 'CRÉATION…' : 'REJOINDRE LA PARTIE →'}
+            {loading ? t('loadingButton') : t('submitButton')}
           </button>
         </form>
 
         <div style={styles.divider}/>
 
         <div style={styles.footer}>
-          Déjà un compte ?{' '}
-          <Link href="/login" style={styles.link}>SE CONNECTER</Link>
+          {t('alreadyAccount')}{' '}
+          <Link href="/login" style={styles.link}>{t('signIn')}</Link>
         </div>
 
         <div style={styles.guestRow}>
-          <Link href="/" style={styles.guestLink}>Continuer sans compte →</Link>
+          <Link href="/" style={styles.guestLink}>{t('continueGuest')}</Link>
         </div>
       </div>
     </div>

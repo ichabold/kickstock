@@ -1,6 +1,30 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
+const SUPPORTED_LOCALES = ['en', 'fr'] as const;
+const LOCALE_COOKIE = 'NEXT_LOCALE';
+const LOCALE_MAX_AGE = 60 * 60 * 24 * 365; // 1 year
+
+function detectLocale(request: NextRequest): string {
+  const acceptLang = request.headers.get('accept-language') ?? '';
+  // Match 'fr', 'fr-FR', 'fr-CA', etc.
+  const primary = acceptLang.split(',')[0]?.split('-')[0]?.toLowerCase() ?? '';
+  return SUPPORTED_LOCALES.includes(primary as (typeof SUPPORTED_LOCALES)[number])
+    ? primary
+    : 'en';
+}
+
+function applyLocaleCookie(response: NextResponse, request: NextRequest): NextResponse {
+  if (request.cookies.get(LOCALE_COOKIE)) return response;
+  const locale = detectLocale(request);
+  response.cookies.set(LOCALE_COOKIE, locale, {
+    path: '/',
+    maxAge: LOCALE_MAX_AGE,
+    sameSite: 'lax',
+  });
+  return response;
+}
+
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
 
@@ -33,10 +57,10 @@ export async function middleware(request: NextRequest) {
   )) {
     const url = request.nextUrl.clone();
     url.pathname = '/';
-    return NextResponse.redirect(url);
+    return applyLocaleCookie(NextResponse.redirect(url), request);
   }
 
-  return supabaseResponse;
+  return applyLocaleCookie(supabaseResponse, request);
 }
 
 export const config = {

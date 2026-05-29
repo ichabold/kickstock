@@ -4,12 +4,14 @@ export const dynamic = 'force-dynamic';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 
 export default function LoginPage() {
   const router   = useRouter();
   const supabase = createClient();
+  const t        = useTranslations('auth.login');
 
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
@@ -39,23 +41,23 @@ export default function LoginPage() {
           <span style={styles.logoIcon}>⚽</span>
           <span style={styles.logoText}>KICKSTOCK</span>
         </div>
-        <div style={styles.subtitle}>WORLD CUP 2026 · TRADING GAME</div>
+        <div style={styles.subtitle}>{t('subtitle')}</div>
 
-        <h1 style={styles.title}>CONNEXION</h1>
+        <h1 style={styles.title}>{t('title')}</h1>
 
         <form onSubmit={handleLogin} style={styles.form}>
-          <label style={styles.label}>EMAIL</label>
+          <label style={styles.label}>{t('emailLabel')}</label>
           <input
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
             required
             autoComplete="email"
-            placeholder="joueur@email.com"
+            placeholder={t('emailPlaceholder')}
             style={styles.input}
           />
 
-          <label style={styles.label}>MOT DE PASSE</label>
+          <label style={styles.label}>{t('passwordLabel')}</label>
           <input
             type="password"
             value={password}
@@ -69,19 +71,19 @@ export default function LoginPage() {
           {error && <div style={styles.error}>{error}</div>}
 
           <button type="submit" disabled={loading} style={styles.btn}>
-            {loading ? 'CONNEXION…' : 'SE CONNECTER →'}
+            {loading ? t('loadingButton') : t('submitButton')}
           </button>
         </form>
 
         <div style={styles.divider}/>
 
         <div style={styles.footer}>
-          Pas encore de compte ?{' '}
-          <Link href="/register" style={styles.link}>CRÉER UN COMPTE</Link>
+          {t('noAccount')}{' '}
+          <Link href="/register" style={styles.link}>{t('createAccount')}</Link>
         </div>
 
         <div style={styles.guestRow}>
-          <Link href="/" style={styles.guestLink}>Continuer sans compte →</Link>
+          <Link href="/" style={styles.guestLink}>{t('continueGuest')}</Link>
         </div>
       </div>
     </div>

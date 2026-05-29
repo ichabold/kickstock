@@ -1,5 +1,6 @@
 'use client';
 
+import { useTranslations } from 'next-intl';
 import { NATIONS } from '@kickstock/constants';
 import { fmt, pctOf } from '@kickstock/game-engine';
 import type { StoredMatchResult } from '@kickstock/types';
@@ -15,6 +16,7 @@ interface Props {
 const gN = (id: string) => NATIONS.find(n => n.id === id);
 
 export default function MatchDetailOverlay({ result, dayLabel, onClose, onNationClick }: Props) {
+  const t = useTranslations('matchDetail');
   const { scoreA, scoreB, res, res90, etRes, penWinner, penA, penB, isUpset, venue, goals = [] } = result;
   const nA     = gN(result.a);
   const nB     = gN(result.b);
@@ -31,13 +33,11 @@ export default function MatchDetailOverlay({ result, dayLabel, onClose, onNation
   return (
     <div className={styles.bg} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className={styles.sheet} onClick={e => e.stopPropagation()}>
-        {/* Top bar */}
         <div className={styles.topBar}>
           <div className={styles.dayLabel}>{dayLabel}</div>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Fermer">✕</button>
+          <button className={styles.closeBtn} onClick={onClose} aria-label={t('closeLabel')}>✕</button>
         </div>
 
-        {/* Score hero */}
         <div className={styles.scoreHero}>
           <div className={styles.teamSide}>
             <div className={styles.teamFlag}>{nA?.flag}</div>
@@ -53,16 +53,18 @@ export default function MatchDetailOverlay({ result, dayLabel, onClose, onNation
               {scoreA}–{scoreB}
             </div>
             {res90 === 'draw' && etRes && !penWinner && (
-              <div className={styles.scoreTag} style={{ color: 'var(--gold)' }}>⚡ AET</div>
+              <div className={styles.scoreTag} style={{ color: 'var(--gold)' }}>{t('aet')}</div>
             )}
             {penWinner && (
-              <div className={styles.scoreTag} style={{ color: 'var(--muted)' }}>PENS {penA}–{penB}</div>
+              <div className={styles.scoreTag} style={{ color: 'var(--muted)' }}>
+                {t('penalties', { penA, penB })}
+              </div>
             )}
             {isDraw && !etRes && !penWinner && (
-              <div className={styles.scoreTag} style={{ color: 'var(--muted)' }}>DRAW</div>
+              <div className={styles.scoreTag} style={{ color: 'var(--muted)' }}>{t('draw')}</div>
             )}
             {isUpset && (
-              <div className={styles.scoreTag} style={{ color: 'var(--upset)', fontWeight: 700 }}>🚀 UPSET!</div>
+              <div className={styles.scoreTag} style={{ color: 'var(--upset)', fontWeight: 700 }}>{t('upset')}</div>
             )}
           </div>
           <div className={styles.teamSide}>
@@ -76,12 +78,10 @@ export default function MatchDetailOverlay({ result, dayLabel, onClose, onNation
           </div>
         </div>
 
-        {/* Goals */}
         {goals.length > 0 ? (
           <div className={styles.goalsSection}>
-            <div className={styles.goalsTitle}>⚽ BUTEURS</div>
+            <div className={styles.goalsTitle}>{t('scorers')}</div>
             <div className={styles.goalsCols}>
-              {/* Column A */}
               <div className={styles.goalsColA}>
                 {goalsA.map((g, i) => (
                   <div key={i} className={styles.goalRow}>
@@ -95,7 +95,6 @@ export default function MatchDetailOverlay({ result, dayLabel, onClose, onNation
                   </div>
                 ))}
               </div>
-              {/* Column B */}
               <div className={styles.goalsColB}>
                 {goalsB.map((g, i) => (
                   <div key={i} className={`${styles.goalRow} ${styles.goalRowRight}`}>
@@ -112,20 +111,19 @@ export default function MatchDetailOverlay({ result, dayLabel, onClose, onNation
             </div>
           </div>
         ) : (
-          <div className={styles.noGoals}>0 – 0 · Aucun buteur enregistré</div>
+          <div className={styles.noGoals}>{t('noScorers')}</div>
         )}
 
-        {/* Price impact */}
         <div className={styles.impactRow}>
           <div className={styles.impactBox}>
-            <div className={styles.impactLbl}>{result.a} IMPACT</div>
+            <div className={styles.impactLbl}>{t('impact', { nation: result.a })}</div>
             <div className={styles.impactPct} style={{ color: pctA >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
               {pctA >= 0 ? '▲' : '▼'}{Math.abs(pctA)}%
             </div>
             <div className={styles.impactPrice}>{result.pA} → {result.newPA} KC</div>
           </div>
           <div className={styles.impactBox}>
-            <div className={styles.impactLbl}>{result.b} IMPACT</div>
+            <div className={styles.impactLbl}>{t('impact', { nation: result.b })}</div>
             <div className={styles.impactPct} style={{ color: pctB >= 0 ? 'var(--gain)' : 'var(--loss)' }}>
               {pctB >= 0 ? '▲' : '▼'}{Math.abs(pctB)}%
             </div>

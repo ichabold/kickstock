@@ -28,6 +28,12 @@
       ],
       "@kickstock/game-engine": [
         "../../packages/game-engine/src/index.ts"
+      ],
+      "@kickstock/i18n": [
+        "../../packages/i18n/index.ts"
+      ],
+      "@kickstock/i18n/locales/*": [
+        "../../packages/i18n/locales/*"
       ]
     },
     "allowJs": true,

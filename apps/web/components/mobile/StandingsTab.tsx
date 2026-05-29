@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useTranslations } from 'next-intl';
 import { CALENDAR, NATIONS } from '@kickstock/constants';
 import { buildGroupStandingsUI } from '@kickstock/game-engine';
 import { useGameStore } from '@/stores/gameStore';
@@ -12,7 +13,15 @@ import styles from './StandingsTab.module.css';
 
 const gN = (id: string) => NATIONS.find(n => n.id === id);
 
+type KoPhase = 'R32' | 'R16' | 'QF' | 'SF' | 'Final' | '3rd';
+type KoLabelKey = 'r32' | 'r16' | 'quarterFinals' | 'semiFinals' | 'final' | 'thirdPlace';
+
+const koLabelKeys: Record<KoPhase, KoLabelKey> = {
+  R32: 'r32', R16: 'r16', QF: 'quarterFinals', SF: 'semiFinals', Final: 'final', '3rd': 'thirdPlace',
+};
+
 export default function StandingsTab() {
+  const t = useTranslations('standings');
   const [nationId,    setNationId]    = useState<string | null>(null);
   const [matchDetail, setMatchDetail] = useState<{ result: StoredMatchResult; dayLabel: string } | null>(null);
 
@@ -20,7 +29,6 @@ export default function StandingsTab() {
   const eliminated   = useGameStore(s => s.eliminated);
   const matchResults = useGameStore(s => s.matchResults);
   const dayIndex     = useGameStore(s => s.dayIndex);
-  const r32Pool      = useGameStore(s => s.r32Pool);
   const champion     = useGameStore(s => s.champion);
 
   const standings = useMemo(
@@ -41,11 +49,7 @@ export default function StandingsTab() {
 
   const isKO = dayIndex > 17 || !CALENDAR[dayIndex] || CALENDAR[dayIndex]?.phase !== 'Groups';
 
-  const koPhases = ['R32', 'R16', 'QF', 'SF', 'Final', '3rd'] as const;
-  const koLabels: Record<string, string> = {
-    R32: 'HUITIÈMES · R32', R16: 'SEIZIÈMES · R16', QF: 'QUARTS DE FINALE',
-    SF: 'DEMI-FINALES', Final: '🏆 FINALE', '3rd': '🥉 PETITE FINALE',
-  };
+  const koPhases: KoPhase[] = ['R32', 'R16', 'QF', 'SF', 'Final', '3rd'];
 
   return (
     <>
@@ -57,7 +61,7 @@ export default function StandingsTab() {
               <div className={styles.champion}>
                 <div className={styles.championFlag}>{gN(champion)?.flag}</div>
                 <button className={styles.championName} onClick={() => setNationId(champion)}>
-                  {gN(champion)?.name?.toUpperCase()} — CHAMPION 🏆
+                  {t('champion', { nation: gN(champion)?.name?.toUpperCase() ?? '' })}
                 </button>
               </div>
             )}
@@ -66,7 +70,7 @@ export default function StandingsTab() {
               if (!res?.length) return null;
               return (
                 <div key={phase} className={styles.koPhase}>
-                  <div className={styles.phaseLabel}>{koLabels[phase]}</div>
+                  <div className={styles.phaseLabel}>{t(koLabelKeys[phase])}</div>
                   {res.map((r, i) => {
                     const nA = gN(r.a), nB = gN(r.b);
                     const dayEntry = Object.entries(matchResults).find(([, results]) =>
@@ -92,8 +96,8 @@ export default function StandingsTab() {
                           </button>
                         </div>
                         {r.penWinner && <div className={styles.koMeta}>Pens {r.penA}–{r.penB}</div>}
-                        {r.etRes && !r.penWinner && <div className={`${styles.koMeta} ${styles.koMetaET}`}>⚡ AET</div>}
-                        {r.isUpset && <div className={`${styles.koMeta} ${styles.koMetaUpset}`}>🚀 UPSET!</div>}
+                        {r.etRes && !r.penWinner && <div className={`${styles.koMeta} ${styles.koMetaET}`}>{t('aet')}</div>}
+                        {r.isUpset && <div className={`${styles.koMeta} ${styles.koMetaUpset}`}>{t('upset')}</div>}
                       </div>
                     );
                   })}
@@ -105,12 +109,12 @@ export default function StandingsTab() {
         )}
 
         {/* Group Standings */}
-        <div className={styles.groupsHeader}>GROUP STANDINGS</div>
+        <div className={styles.groupsHeader}>{t('groupStandings')}</div>
         {Object.entries(standings).map(([g, teams]) => {
           const groupDaysPlayed = Object.keys(matchResults).filter(di =>
             CALENDAR[Number(di)]?.phase === 'Groups'
           ).length;
-          const matchday = `MD ${Math.min(groupDaysPlayed, 3)} of 3`;
+          const matchday = t('matchday', { n: Math.min(groupDaysPlayed, 3), total: 3 });
           return (
             <StandingsCard
               key={g}

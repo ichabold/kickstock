@@ -9,11 +9,13 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import styles from './page.module.css';
 
 export default function ResetPasswordPage() {
   const router  = useRouter();
+  const t       = useTranslations('auth.resetPassword');
   const [password,  setPassword]  = useState('');
   const [password2, setPassword2] = useState('');
   const [loading,   setLoading]   = useState(false);
@@ -22,8 +24,8 @@ export default function ResetPasswordPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (password.length < 8) { setError('Le mot de passe doit faire au moins 8 caractères.'); return; }
-    if (password !== password2) { setError('Les mots de passe ne correspondent pas.'); return; }
+    if (password.length < 8) { setError(t('tooShort')); return; }
+    if (password !== password2) { setError(t('mismatch')); return; }
 
     setLoading(true);
     setError('');
@@ -32,7 +34,7 @@ export default function ResetPasswordPage() {
     const { error: err } = await sb.auth.updateUser({ password });
 
     if (err) {
-      setError('Erreur lors de la mise à jour. Réessaie.');
+      setError(t('updateError'));
       setLoading(false);
       return;
     }
@@ -47,33 +49,33 @@ export default function ResetPasswordPage() {
         {done ? (
           <>
             <div className={styles.icon}>✓</div>
-            <div className={styles.title}>MOT DE PASSE MODIFIÉ</div>
-            <div className={styles.sub}>Tu vas être redirigé…</div>
+            <div className={styles.title}>{t('successTitle')}</div>
+            <div className={styles.sub}>{t('successSubtitle')}</div>
           </>
         ) : (
           <>
-            <div className={styles.title}>NOUVEAU MOT DE PASSE</div>
-            <div className={styles.sub}>Choisis un nouveau mot de passe pour ton compte.</div>
+            <div className={styles.title}>{t('title')}</div>
+            <div className={styles.sub}>{t('subtitle')}</div>
 
             <form onSubmit={handleSubmit} className={styles.form}>
               <div>
-                <label className={styles.label}>Nouveau mot de passe</label>
+                <label className={styles.label}>{t('newPasswordLabel')}</label>
                 <input
                   type="password"
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="8 caractères minimum"
+                  placeholder={t('newPasswordPlaceholder')}
                   autoFocus
                   className={styles.input}
                 />
               </div>
               <div>
-                <label className={styles.label}>Confirmer</label>
+                <label className={styles.label}>{t('confirmLabel')}</label>
                 <input
                   type="password"
                   value={password2}
                   onChange={e => setPassword2(e.target.value)}
-                  placeholder="Même mot de passe"
+                  placeholder={t('confirmPlaceholder')}
                   className={styles.input}
                 />
               </div>
@@ -85,7 +87,7 @@ export default function ResetPasswordPage() {
                 disabled={loading || password.length < 8 || password !== password2}
                 className={styles.btn}
               >
-                {loading ? 'SAUVEGARDE…' : 'CONFIRMER →'}
+                {loading ? t('savingButton') : t('confirmButton')}
               </button>
             </form>
           </>

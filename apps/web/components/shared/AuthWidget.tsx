@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { useTranslations } from 'next-intl';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { useGameStore } from '@/stores/gameStore';
@@ -15,13 +17,15 @@ interface Props {
 }
 
 export default function AuthWidget({ compact = false }: Props) {
+  const t = useTranslations('authWidget');
+  const router = useRouter();
   const { user, profile, loading, signOut } = useAuth();
   const bestScore = useGameStore(s => s.bestScore);
 
   const [guestPseudo, setGuestPseudo] = useState<string | null>(null);
   useEffect(() => {
     if (!loading && !user) setGuestPseudo(getPseudo());
-    if (user) clearPseudo(); // clean up localStorage on login
+    if (user) clearPseudo();
   }, [loading, user]);
 
   useEffect(() => {
@@ -30,18 +34,12 @@ export default function AuthWidget({ compact = false }: Props) {
     return () => window.removeEventListener('kickstock:pseudo-saved', onSaved);
   }, []);
 
-  // ── Apply pending OAuth pseudo (persistent across redirects) ───────────────
-  // We store the guest pseudo in localStorage BEFORE the OAuth redirect so it
-  // survives the round-trip. Here we apply it once the profile is available and
-  // is_auto=true (i.e. the account still has the trigger-generated username).
-  // This runs in AuthWidget (always mounted) — not WelcomeModal — so it is
-  // never cancelled by an unmount mid-flow.
   useEffect(() => {
     if (!user || !profile) return;
     const pending = getOAuthPending();
-    clearOAuthPending(); // remove regardless, to avoid stale re-apply
+    clearOAuthPending();
     if (!pending || !isValidPseudoFormat(pending)) return;
-    if (!profile.is_auto) return; // already has a user-chosen pseudo
+    if (!profile.is_auto) return;
 
     fetch('/api/auth/set-username', {
       method: 'POST',
@@ -70,7 +68,6 @@ export default function AuthWidget({ compact = false }: Props) {
 
   if (loading) return null;
 
-  // ── Logged-in registered user ─────────────────────────────────────────────
   if (user) {
     const name      = profile?.username ?? user.email?.split('@')[0] ?? '';
     const initial   = name[0]?.toUpperCase() ?? '?';
@@ -88,6 +85,7 @@ export default function AuthWidget({ compact = false }: Props) {
               bestScore={bestScore}
               avatarUrl={avatarUrl}
               initial={initial}
+              onClose={() => setPanelOpen(false)}
               onSignOut={async () => {
                 setPanelOpen(false);
                 useGameStore.getState().resetGame();
@@ -100,7 +98,6 @@ export default function AuthWidget({ compact = false }: Props) {
       );
     }
 
-    // Desktop: avatar only, panel on click
     return (
       <div ref={panelRef}>
         <button onClick={() => setPanelOpen(v => !v)} style={s.sidebarAvatarBtn}>
@@ -114,6 +111,7 @@ export default function AuthWidget({ compact = false }: Props) {
               bestScore={bestScore}
               avatarUrl={avatarUrl}
               initial={initial}
+              onClose={() => setPanelOpen(false)}
               onSignOut={async () => {
                 setPanelOpen(false);
                 useGameStore.getState().resetGame();
@@ -127,7 +125,6 @@ export default function AuthWidget({ compact = false }: Props) {
     );
   }
 
-  // ── Guest user ────────────────────────────────────────────────────────────
   if (guestPseudo) {
     const initial = guestPseudo[0].toUpperCase();
 
@@ -144,12 +141,11 @@ export default function AuthWidget({ compact = false }: Props) {
       );
     }
 
-    // Desktop: avatar only + GUEST label below, panel on click
     return (
       <div ref={panelRef}>
         <button onClick={() => setPanelOpen(v => !v)} style={s.sidebarAvatarBtn}>
           <Avatar initial={initial} size={34} />
-          <span style={s.guestLabel}>GUEST</span>
+          <span style={s.guestLabel}>{t('guest')}</span>
         </button>
 
         {panelOpen && (
@@ -161,7 +157,6 @@ export default function AuthWidget({ compact = false }: Props) {
     );
   }
 
-  // ── Anonymous ─────────────────────────────────────────────────────────────
   return (
     <>
       <button
@@ -180,7 +175,7 @@ export default function AuthWidget({ compact = false }: Props) {
           whiteSpace: 'nowrap',
         }}
       >
-        {compact ? '⚽ LOGIN' : '⚽ SE CONNECTER'}
+        {compact ? t('loginCompact') : t('loginDesktop')}
       </button>
       {emailAuthOpen && (
         <EmailAuthModal onClose={() => setEmailAuthOpen(false)} />
@@ -230,17 +225,47 @@ function Avatar({ initial, size, url }: { initial: string; size: number; url?: s
   );
 }
 
+// ─── Language switcher ────────────────────────────────────────────────────────
+
+function LanguageSwitcher() {
+  const t = useTranslations('authWidget');
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+
+  function setLocale(locale: string) {
+    document.cookie = `NEXT_LOCALE=${locale}; path=/; max-age=31536000; SameSite=Lax`;
+    setOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(v => !v)} style={s.resetBtn}>
+        {t('language')}
+      </button>
+      {open && (
+        <div style={s.langMenu}>
+          <button onClick={() => setLocale('fr')} style={s.langOption}>{t('languageFr')}</button>
+          <button onClick={() => setLocale('en')} style={s.langOption}>{t('languageEn')}</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Account menu (registered users) ─────────────────────────────────────────
 
-function AccountMenu({ name, bestScore, avatarUrl, initial, onSignOut }: {
+function AccountMenu({ name, bestScore, avatarUrl, initial, onClose, onSignOut }: {
   name: string;
   bestScore: number | null;
   avatarUrl?: string;
   initial: string;
+  onClose: () => void;
   onSignOut: () => void;
 }) {
-  const [confirmReset,   setConfirmReset]   = useState(false);
-  const [changePseudo,   setChangePseudo]   = useState(false);
+  const t = useTranslations('authWidget');
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [changePseudo, setChangePseudo] = useState(false);
   const resetGame = useGameStore(s => s.resetGame);
 
   return (
@@ -258,13 +283,14 @@ function AccountMenu({ name, bestScore, avatarUrl, initial, onSignOut }: {
       </div>
       <div style={s.menuDivider} />
       <button onClick={() => setChangePseudo(true)} style={s.resetBtn}>
-        ✏️ Changer mon pseudo
+        {t('changePseudo')}
       </button>
+      <LanguageSwitcher />
       <button onClick={() => setConfirmReset(true)} style={s.resetBtn}>
-        🔄 Recommencer une partie
+        {t('restartGame')}
       </button>
       <button onClick={onSignOut} style={s.signOutBtn}>
-        Déconnexion
+        {t('logout')}
       </button>
 
       {confirmReset && (
@@ -286,6 +312,7 @@ function AccountMenu({ name, bestScore, avatarUrl, initial, onSignOut }: {
 // ─── Change pseudo modal ──────────────────────────────────────────────────────
 
 function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; onClose: () => void }) {
+  const t = useTranslations('authWidget');
   const [pseudo,  setPseudo]  = useState('');
   const [state,   setState]   = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   const [saving,  setSaving]  = useState(false);
@@ -300,14 +327,13 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
     setSaving(true);
     setError('');
 
-    // Inline availability check — single click
     if (state !== 'available') {
       try {
         const chk = await fetch(`/api/auth/check-pseudo?q=${encodeURIComponent(trimmed)}`);
         const chkData = await chk.json();
         if (!chkData.available) {
           setState('taken');
-          setError('Ce pseudo est déjà pris.');
+          setError(t('pseudoTaken'));
           setSaving(false);
           return;
         }
@@ -323,7 +349,7 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
     const data = await res.json();
 
     if (!res.ok) {
-      setError(data.error === 'taken' ? 'Ce pseudo est déjà pris.' : 'Erreur, réessaie.');
+      setError(data.error === 'taken' ? t('pseudoTaken') : t('genericError'));
       if (data.error === 'taken') setState('taken');
       setSaving(false);
       return;
@@ -338,14 +364,14 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
   return (
     <div style={s.confirmOverlay}>
       <div style={{ ...s.confirmCard, gap: 0 }}>
-        <div style={{ ...s.confirmTitle, marginBottom: 6 }}>CHANGER MON PSEUDO</div>
+        <div style={{ ...s.confirmTitle, marginBottom: 6 }}>{t('changePseudoTitle')}</div>
         <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 16, textAlign: 'center' }}>
-          Actuel : <strong style={{ color: 'var(--text)' }}>{currentPseudo}</strong>
+          {t('currentPseudo', { pseudo: currentPseudo })}
         </div>
 
         {success ? (
           <div style={{ textAlign: 'center', color: 'var(--gain)', fontSize: 13, padding: '12px 0' }}>
-            ✓ Pseudo mis à jour !
+            {t('pseudoUpdated')}
           </div>
         ) : (
           <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -361,7 +387,7 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
                     .then(d => setState(d.available ? 'available' : 'taken'))
                     .catch(() => setState('idle'));
                 }}}
-                placeholder="Nouveau pseudo"
+                placeholder={t('newPseudoPlaceholder')}
                 maxLength={20}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -378,7 +404,7 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
             </div>
 
             {state === 'taken' && (
-              <div style={s.pseudoError}>Pseudo déjà pris.</div>
+              <div style={s.pseudoError}>{t('pseudoTaken')}</div>
             )}
             {error && state !== 'taken' && (
               <div style={s.pseudoError}>{error}</div>
@@ -389,10 +415,10 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
               disabled={!isSubmittable}
               style={{ ...s.confirmDanger, background: 'var(--gold)', color: '#000', opacity: isSubmittable ? 1 : 0.4 }}
             >
-              {saving ? 'SAUVEGARDE…' : 'CONFIRMER →'}
+              {saving ? t('savingButton') : t('saveButton')}
             </button>
             <button type="button" onClick={onClose} style={s.confirmCancel}>
-              Annuler
+              {t('cancelButton')}
             </button>
           </form>
         )}
@@ -402,19 +428,17 @@ function ChangePseudoModal({ currentPseudo, onClose }: { currentPseudo: string; 
 }
 
 function ResetConfirmOverlay({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
+  const t = useTranslations('authWidget');
   return (
     <div style={s.confirmOverlay}>
       <div style={s.confirmCard}>
-        <div style={s.confirmTitle}>RECOMMENCER ?</div>
-        <div style={s.confirmText}>
-          Tu vas perdre toute ta progression actuelle : cash, positions, historique.
-          Cette action est irréversible.
-        </div>
+        <div style={s.confirmTitle}>{t('restartTitle')}</div>
+        <div style={s.confirmText}>{t('restartText')}</div>
         <button onClick={onConfirm} style={s.confirmDanger}>
-          OUI, RECOMMENCER
+          {t('restartConfirm')}
         </button>
         <button onClick={onCancel} style={s.confirmCancel}>
-          Annuler
+          {t('cancelButton')}
         </button>
       </div>
     </div>
@@ -424,6 +448,7 @@ function ResetConfirmOverlay({ onConfirm, onCancel }: { onConfirm: () => void; o
 // ─── Upgrade panel (guest users) ─────────────────────────────────────────────
 
 function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void }) {
+  const t = useTranslations('authWidget');
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleError,   setGoogleError]   = useState('');
   const [emailOpen,     setEmailOpen]     = useState(false);
@@ -431,7 +456,7 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
   async function handleGoogle() {
     setGoogleLoading(true);
     setGoogleError('');
-    saveOAuthPending(); // persist guest pseudo before the page navigates away
+    saveOAuthPending();
     document.cookie = `ks_pending_device=${getDeviceId()}; path=/; max-age=600; SameSite=Lax`;
     const sb = createClient();
     const { error } = await sb.auth.signInWithOAuth({
@@ -439,24 +464,26 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (error) {
-      setGoogleError('Connexion Google échouée. Réessaie.');
+      setGoogleError(t('googleError'));
       setGoogleLoading(false);
     }
   }
+
+  const benefits = [t('playOnAllDevices'), t('progressSaved'), t('leaderboardProtected')];
 
   return (
     <div style={s.menuWrap}>
       <div style={s.guestHeader}>
         <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{pseudo}</div>
         <div style={{ fontSize: 9, letterSpacing: 1, color: 'var(--muted)', fontFamily: 'var(--font-display)', marginTop: 2 }}>
-          GUEST
+          {t('guest')}
         </div>
       </div>
 
       <div style={s.menuDivider} />
 
       <div style={s.benefitsList}>
-        {['Joue sur tous tes devices', 'Progression sauvegardée', 'Classement protégé'].map(b => (
+        {benefits.map(b => (
           <div key={b} style={s.benefit}>
             <span style={{ color: 'var(--gain)', marginRight: 8, fontSize: 11 }}>✓</span>
             <span style={{ fontSize: 11, color: 'var(--muted)' }}>{b}</span>
@@ -471,14 +498,14 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
           style={{ ...s.oauthBtn, opacity: googleLoading ? 0.6 : 1 }}
         >
           <span style={s.oauthIcon}>G</span>
-          {googleLoading ? 'Redirection…' : 'Continuer avec Google'}
+          {googleLoading ? t('redirecting') : t('continueGoogle')}
         </button>
         {googleError && <div style={s.errorTip}>{googleError}</div>}
         <button
           onClick={() => setEmailOpen(true)}
           style={s.oauthBtn}
         >
-          <span style={s.oauthIcon}>✉</span>Email / Mot de passe
+          <span style={s.oauthIcon}>✉</span>{t('emailPassword')}
         </button>
         {emailOpen && (
           <EmailAuthModal
@@ -488,11 +515,11 @@ function UpgradePanel({ pseudo, onClose }: { pseudo: string; onClose: () => void
         )}
         <button disabled style={{ ...s.oauthBtn, opacity: 0.3, cursor: 'not-allowed' }}>
           <span style={s.oauthIcon}></span>Apple
-          <span style={s.comingSoon}>BIENTÔT</span>
+          <span style={s.comingSoon}>{t('appleComingSoon')}</span>
         </button>
       </div>
 
-      <div style={s.migrationNote}>Ta progression sera migrée automatiquement.</div>
+      <div style={s.migrationNote}>{t('migrationNote')}</div>
     </div>
   );
 }
@@ -509,7 +536,6 @@ const s: Record<string, React.CSSProperties> = {
     alignItems: 'center',
     gap: 8,
   },
-  // Sidebar (desktop): centered column, avatar + optional label
   sidebarAvatarBtn: {
     background: 'none',
     border: 'none',
@@ -530,7 +556,7 @@ const s: Record<string, React.CSSProperties> = {
   desktopPanel: {
     position: 'fixed',
     bottom: 16,
-    left: 80, // just outside the 72px sidebar
+    left: 80,
     width: 260,
     background: 'var(--s1)',
     border: '1px solid var(--border-hi)',
@@ -637,6 +663,32 @@ const s: Record<string, React.CSSProperties> = {
     textAlign: 'left' as const,
     transition: 'border-color .15s, color .15s',
     marginBottom: 6,
+  },
+  langMenu: {
+    position: 'absolute' as const,
+    right: 0,
+    top: '100%',
+    marginTop: 4,
+    background: 'var(--s1)',
+    border: '1px solid var(--border-hi)',
+    borderRadius: 8,
+    overflow: 'hidden',
+    zIndex: 10,
+    minWidth: 140,
+    boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+  },
+  langOption: {
+    display: 'block',
+    width: '100%',
+    background: 'none',
+    border: 'none',
+    padding: '9px 14px',
+    color: 'var(--text)',
+    fontSize: 12,
+    cursor: 'pointer',
+    fontFamily: 'var(--font-body)',
+    textAlign: 'left' as const,
+    transition: 'background .1s',
   },
   confirmOverlay: {
     position: 'fixed' as const,

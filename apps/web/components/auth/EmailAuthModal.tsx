@@ -9,6 +9,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { useTranslations } from 'next-intl';
 import { createClient } from '@/lib/supabase/client';
 import { isValidPseudoFormat, getPseudo, saveOAuthPending } from '@/lib/pseudo';
 import { getDeviceId } from '@/lib/device';
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export default function EmailAuthModal({ defaultView = 'signin', onClose }: Props) {
+  const t = useTranslations('auth.emailModal');
   const [view, setView] = useState<View>(defaultView);
 
   // Close on Escape
@@ -41,13 +43,13 @@ export default function EmailAuthModal({ defaultView = 'signin', onClose }: Prop
               style={{ ...s.tab, ...(view === 'signin' ? s.tabActive : {}) }}
               onClick={() => setView('signin')}
             >
-              CONNEXION
+              {t('loginTab')}
             </button>
             <button
               style={{ ...s.tab, ...(view === 'signup' ? s.tabActive : {}) }}
               onClick={() => setView('signup')}
             >
-              INSCRIPTION
+              {t('registerTab')}
             </button>
           </div>
         )}
@@ -65,6 +67,7 @@ export default function EmailAuthModal({ defaultView = 'signin', onClose }: Prop
 // ─── Sign In ──────────────────────────────────────────────────────────────────
 
 function SignInView({ onForgot, onClose }: { onForgot: () => void; onClose: () => void }) {
+  const t = useTranslations('auth.emailModal');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
   const [loading,  setLoading]  = useState(false);
@@ -81,8 +84,8 @@ function SignInView({ onForgot, onClose }: { onForgot: () => void; onClose: () =
 
     if (err) {
       setError(err.message === 'Invalid login credentials'
-        ? 'Email ou mot de passe incorrect.'
-        : 'Erreur de connexion. Réessaie.');
+        ? t('wrongCredentials')
+        : t('loginError'));
       setLoading(false);
       return;
     }
@@ -93,22 +96,22 @@ function SignInView({ onForgot, onClose }: { onForgot: () => void; onClose: () =
 
   return (
     <form onSubmit={handleSubmit} style={s.form}>
-      <Field label="Email" type="email" value={email} onChange={setEmail}
-             placeholder="ton@email.com" autoFocus />
-      <Field label="Mot de passe" type="password" value={password} onChange={setPassword}
+      <Field label={t('emailLabel')} type="email" value={email} onChange={setEmail}
+             placeholder={t('emailPlaceholder')} autoFocus />
+      <Field label={t('passwordLabel')} type="password" value={password} onChange={setPassword}
              placeholder="••••••••" />
 
       {error && <div style={s.errorBox}>{error}</div>}
 
       <button type="submit" disabled={loading || !email || !password} style={s.submitBtn}>
-        {loading ? 'CONNEXION…' : 'SE CONNECTER →'}
+        {loading ? t('loadingLoginButton') : t('loginButton')}
       </button>
 
       <button type="button" onClick={onForgot} style={s.linkBtn}>
-        Mot de passe oublié ?
+        {t('forgotPassword')}
       </button>
 
-      <Divider />
+      <Divider label={t('divider')} />
       <GoogleBtn />
     </form>
   );
@@ -117,6 +120,7 @@ function SignInView({ onForgot, onClose }: { onForgot: () => void; onClose: () =
 // ─── Sign Up ──────────────────────────────────────────────────────────────────
 
 function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClose: () => void }) {
+  const t = useTranslations('auth.emailModal');
   // Pre-fill with the guest pseudo if the player already chose one
   const guestPseudo = getPseudo();
   const [pseudo,    setPseudo]    = useState(guestPseudo ?? '');
@@ -147,8 +151,8 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
     const trimPseudo = pseudo.trim();
     const trimEmail  = email.trim().toLowerCase();
     if (loading || pseudoState === 'taken' || pseudoState === 'checking') return;
-    if (!isValidPseudoFormat(trimPseudo)) { setError('Pseudo invalide (3-20 caractères, lettres/chiffres/_-).'); return; }
-    if (password.length < 8) { setError('Le mot de passe doit faire au moins 8 caractères.'); return; }
+    if (!isValidPseudoFormat(trimPseudo)) { setError(t('invalidPseudo')); return; }
+    if (password.length < 8) { setError(t('passwordTooShort')); return; }
 
     setLoading(true);
     setError('');
@@ -161,8 +165,8 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
       if (chkData.exists) {
         setError(
           chkData.confirmed
-            ? 'Cet email est déjà utilisé. Connecte-toi ou utilise « Mot de passe oublié ».'
-            : 'Un email de confirmation a déjà été envoyé à cette adresse. Vérifie ta boîte mail.',
+            ? t('emailAlreadyUsed')
+            : t('confirmationAlreadySent'),
         );
         setLoading(false);
         return;
@@ -186,9 +190,9 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
 
     if (err) {
       if (err.message.toLowerCase().includes('already registered')) {
-        setError('Cet email est déjà utilisé. Connecte-toi ou utilise « Mot de passe oublié ».');
+        setError(t('emailAlreadyUsed'));
       } else {
-        setError('Erreur lors de l\'inscription. Réessaie.');
+        setError(t('registerError'));
       }
       setLoading(false);
       return;
@@ -197,7 +201,7 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
     // Supabase may return success with empty identities when enumeration
     // protection is on but the email is already taken.
     if (!data.user || (data.user.identities ?? []).length === 0) {
-      setError('Cet email est déjà utilisé. Connecte-toi ou utilise « Mot de passe oublié ».');
+      setError(t('emailAlreadyUsed'));
       setLoading(false);
       return;
     }
@@ -214,13 +218,13 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
   return (
     <form onSubmit={handleSubmit} style={s.form}>
       <div>
-        <label style={s.label}>Pseudo</label>
+        <label style={s.label}>{t('pseudoLabel')}</label>
         <div style={{ position: 'relative' }}>
           <input
             value={pseudo}
             onChange={e => { setPseudo(e.target.value); setPseudoState('idle'); setError(''); }}
             onBlur={() => { if (pseudo.trim()) checkPseudo(pseudo.trim()); }}
-            placeholder="Ton pseudo (3-20 car.)"
+            placeholder={t('pseudoPlaceholder')}
             maxLength={20}
             autoCapitalize="off"
             autoCorrect="off"
@@ -237,22 +241,22 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
           {pseudoState === 'ok'       && <span style={{ ...s.hint, color: 'var(--gain)' }}>✓</span>}
         </div>
         {pseudoState === 'taken' && (
-          <div style={{ ...s.errorBox, marginTop: 4 }}>Pseudo déjà pris.</div>
+          <div style={{ ...s.errorBox, marginTop: 4 }}>{t('pseudoTaken')}</div>
         )}
       </div>
 
-      <Field label="Email" type="email" value={email} onChange={setEmail}
-             placeholder="ton@email.com" />
-      <Field label="Mot de passe" type="password" value={password} onChange={setPassword}
-             placeholder="8 caractères minimum" />
+      <Field label={t('emailLabel')} type="email" value={email} onChange={setEmail}
+             placeholder={t('emailPlaceholder')} />
+      <Field label={t('passwordLabel')} type="password" value={password} onChange={setPassword}
+             placeholder={t('passwordPlaceholder')} />
 
       {error && <div style={s.errorBox}>{error}</div>}
 
       <button type="submit" disabled={!canSubmit} style={{ ...s.submitBtn, opacity: canSubmit ? 1 : 0.45 }}>
-        {loading ? 'CRÉATION…' : 'CRÉER MON COMPTE →'}
+        {loading ? t('loadingRegisterButton') : t('registerButton')}
       </button>
 
-      <Divider />
+      <Divider label={t('divider')} />
       <GoogleBtn />
     </form>
   );
@@ -261,6 +265,7 @@ function SignUpView({ onCheckEmail, onClose }: { onCheckEmail: () => void; onClo
 // ─── Forgot password ──────────────────────────────────────────────────────────
 
 function ForgotView({ onSent, onBack }: { onSent: () => void; onBack: () => void }) {
+  const t = useTranslations('auth.emailModal');
   const [email,   setEmail]   = useState('');
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
@@ -277,7 +282,7 @@ function ForgotView({ onSent, onBack }: { onSent: () => void; onBack: () => void
     });
 
     if (err) {
-      setError('Erreur lors de l\'envoi. Réessaie.');
+      setError(t('sendError'));
       setLoading(false);
       return;
     }
@@ -287,20 +292,20 @@ function ForgotView({ onSent, onBack }: { onSent: () => void; onBack: () => void
 
   return (
     <form onSubmit={handleSubmit} style={s.form}>
-      <div style={s.infoTitle}>MOT DE PASSE OUBLIÉ</div>
-      <div style={s.infoSub}>Saisis ton email et on t&apos;envoie un lien de réinitialisation.</div>
+      <div style={s.infoTitle}>{t('forgotPasswordTitle')}</div>
+      <div style={s.infoSub}>{t('forgotPasswordSubtitle')}</div>
 
-      <Field label="Email" type="email" value={email} onChange={setEmail}
-             placeholder="ton@email.com" autoFocus />
+      <Field label={t('emailLabel')} type="email" value={email} onChange={setEmail}
+             placeholder={t('emailPlaceholder')} autoFocus />
 
       {error && <div style={s.errorBox}>{error}</div>}
 
       <button type="submit" disabled={loading || !email.includes('@')} style={s.submitBtn}>
-        {loading ? 'ENVOI…' : 'ENVOYER LE LIEN →'}
+        {loading ? t('sendingButton') : t('sendLinkButton')}
       </button>
 
       <button type="button" onClick={onBack} style={s.linkBtn}>
-        ← Retour à la connexion
+        {t('backToLogin')}
       </button>
     </form>
   );
@@ -309,14 +314,12 @@ function ForgotView({ onSent, onBack }: { onSent: () => void; onBack: () => void
 // ─── Check email screen ───────────────────────────────────────────────────────
 
 function CheckEmailView({ onClose }: { onClose: () => void }) {
+  const t = useTranslations('auth.emailModal');
   return (
     <div style={{ ...s.form, alignItems: 'center', textAlign: 'center' }}>
       <div style={s.bigIcon}>✉</div>
-      <div style={s.infoTitle}>VÉRIFIE TES EMAILS</div>
-      <div style={s.infoSub}>
-        On t&apos;a envoyé un lien de confirmation.<br />
-        Clique dessus pour activer ton compte.
-      </div>
+      <div style={s.infoTitle}>{t('checkEmailTitle')}</div>
+      <div style={s.infoSub}>{t('checkEmailSubtitle')}</div>
       <button onClick={onClose} style={{ ...s.submitBtn, marginTop: 8 }}>
         OK
       </button>
@@ -325,14 +328,12 @@ function CheckEmailView({ onClose }: { onClose: () => void }) {
 }
 
 function ForgotSentView({ onClose }: { onClose: () => void }) {
+  const t = useTranslations('auth.emailModal');
   return (
     <div style={{ ...s.form, alignItems: 'center', textAlign: 'center' }}>
       <div style={s.bigIcon}>✓</div>
-      <div style={s.infoTitle}>EMAIL ENVOYÉ</div>
-      <div style={s.infoSub}>
-        Vérifie ta boîte mail et clique sur le lien<br />
-        pour réinitialiser ton mot de passe.
-      </div>
+      <div style={s.infoTitle}>{t('emailSentTitle')}</div>
+      <div style={s.infoSub}>{t('emailSentSubtitle')}</div>
       <button onClick={onClose} style={{ ...s.submitBtn, marginTop: 8 }}>
         OK
       </button>
@@ -370,17 +371,19 @@ function Field({
   );
 }
 
-function Divider() {
+function Divider({ label }: { label: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-      <span style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 1 }}>OU</span>
+      <span style={{ fontSize: 10, color: 'var(--dim)', letterSpacing: 1 }}>{label}</span>
       <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
     </div>
   );
 }
 
 function GoogleBtn() {
+  const t = useTranslations('auth.emailModal');
+  const tc = useTranslations('common');
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState('');
 
@@ -395,7 +398,7 @@ function GoogleBtn() {
       options: { redirectTo: `${window.location.origin}/auth/callback` },
     });
     if (err) {
-      setError('Connexion Google échouée. Réessaie.');
+      setError(t('googleError'));
       setLoading(false);
     }
   }
@@ -404,7 +407,7 @@ function GoogleBtn() {
     <div>
       <button type="button" onClick={handleGoogle} disabled={loading} style={s.googleBtn}>
         <span style={s.googleIcon}>G</span>
-        {loading ? 'Redirection…' : 'Continuer avec Google'}
+        {loading ? tc('redirecting') : t('continueGoogle')}
       </button>
       {error && <div style={{ ...s.errorBox, marginTop: 4 }}>{error}</div>}
     </div>

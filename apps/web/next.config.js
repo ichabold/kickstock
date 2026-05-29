@@ -7,6 +7,7 @@ const nextConfig = {
     '@kickstock/types',
     '@kickstock/constants',
     '@kickstock/game-engine',
+    '@kickstock/i18n',
   ],
   eslint: {
     ignoreDuringBuilds: true,   // ESLint not installed as build dep — lint locally

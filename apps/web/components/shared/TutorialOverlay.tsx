@@ -1,33 +1,23 @@
 'use client';
 
 import { useState } from 'react';
+import { useTranslations } from 'next-intl';
 
-const TUT_STEPS = [
-  {
-    title: 'Bienvenue sur KickStock !',
-    text: 'Investissez dans les équipes nationales comme des actions. Plus une équipe performe, plus son prix monte.',
-    icon: '⚽',
-  },
-  {
-    title: 'Mouvements de prix',
-    text: "Un résultat positif augmente le prix. Une défaite le fait chuter. Le gagnant absorbe 40% de la valeur du perdant.",
-    icon: '📈',
-  },
-  {
-    title: 'Dividendes & Taxes',
-    text: "Quand votre équipe se qualifie (R32, R16, QF, SF, Finale, Champion), vous recevez des dividendes en KC. La taxe (10% groupes, 5% KO) s'applique uniquement à la vente.",
-    icon: '💰',
-  },
-  {
-    title: 'Lock-up marché',
-    text: "Le marché est gelé 15 min avant et 30 min après chaque match. Planifiez vos trades à l'avance !",
-    icon: '🔒',
-  },
-];
+const STEP_ICONS = ['⚽', '📈', '💰', '🔒'];
 
 export default function TutorialOverlay({ onClose }: { onClose: () => void }) {
+  const t = useTranslations('tutorial');
   const [step, setStep] = useState(0);
-  const s = TUT_STEPS[step];
+
+  const steps = [
+    { title: t('step1Title'), text: t('step1Text'), icon: STEP_ICONS[0] },
+    { title: t('step2Title'), text: t('step2Text'), icon: STEP_ICONS[1] },
+    { title: t('step3Title'), text: t('step3Text'), icon: STEP_ICONS[2] },
+    { title: t('step4Title'), text: t('step4Text'), icon: STEP_ICONS[3] },
+  ];
+
+  const s = steps[step];
+  const isLast = step === steps.length - 1;
 
   return (
     <div style={ts.overlay} onClick={onClose}>
@@ -37,23 +27,23 @@ export default function TutorialOverlay({ onClose }: { onClose: () => void }) {
         <div style={ts.title}>{s.title}</div>
         <div style={ts.text}>{s.text}</div>
         <div style={ts.dots}>
-          {TUT_STEPS.map((_, i) => (
+          {steps.map((_, i) => (
             <div key={i} style={{ ...ts.dot, ...(i === step ? ts.dotOn : {}) }} />
           ))}
         </div>
         <div style={ts.btns}>
           {step > 0 && (
             <button style={{ ...ts.btn, ...ts.btnSec }} onClick={() => setStep(n => n - 1)}>
-              ← RETOUR
+              {t('back')}
             </button>
           )}
-          {step < TUT_STEPS.length - 1 ? (
+          {!isLast ? (
             <button style={{ ...ts.btn, ...ts.btnPri }} onClick={() => setStep(n => n + 1)}>
-              SUIVANT →
+              {t('next')}
             </button>
           ) : (
             <button style={{ ...ts.btn, ...ts.btnPri }} onClick={onClose}>
-              COMMENCER ✓
+              {t('start')}
             </button>
           )}
         </div>

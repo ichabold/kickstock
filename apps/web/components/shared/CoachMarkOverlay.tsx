@@ -2,68 +2,27 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
+import { useTranslations } from 'next-intl';
 
 interface Beat {
   selector: string;
-  label: string;
-  text: string;
+  labelKey: string;
+  textKey: string;
   tip: 'top' | 'bottom' | 'right';
 }
 
-// 4 beats anchored to real UI elements in BrowserShell
 const BROWSER_BEATS: Beat[] = [
-  {
-    selector: '.stile',
-    label: 'RÈGLE 1 · 4',
-    text: 'Chaque carte = une équipe nationale. Elle gagne → son prix monte. Elle perd → le vainqueur absorbe 40% de sa valeur.',
-    tip: 'bottom',
-  },
-  {
-    selector: '.tbs:first-child',
-    label: 'RÈGLE 2 · 4',
-    text: 'Quand une de tes équipes se qualifie (R32, R16, QF, SF, Finale), un dividende atterrit automatiquement dans ton cash.',
-    tip: 'bottom',
-  },
-  {
-    selector: '.sim-inline-btn',
-    label: 'RÈGLE 3 · 4',
-    text: "Le marché gèle 15 min avant chaque match. Ce bouton simule la journée — fais tes trades avant qu'il ne disparaisse.",
-    tip: 'bottom',
-  },
-  {
-    selector: '.bbuy',
-    label: 'RÈGLE 4 · 4 — DERNIÈRE',
-    text: 'Acheter est gratuit. Vendre coûte 10% (groupes) ou 5% (KO). Voilà — choisis une équipe et fais ton premier trade !',
-    tip: 'top',
-  },
+  { selector: '.stile',            labelKey: 'browser.rule1Label', textKey: 'browser.rule1Text', tip: 'bottom' },
+  { selector: '.tbs:first-child',  labelKey: 'browser.rule2Label', textKey: 'browser.rule2Text', tip: 'bottom' },
+  { selector: '.sim-inline-btn',   labelKey: 'browser.rule3Label', textKey: 'browser.rule3Text', tip: 'bottom' },
+  { selector: '.bbuy',             labelKey: 'browser.rule4Label', textKey: 'browser.rule4Text', tip: 'top'    },
 ];
 
-// 4 beats anchored to real UI elements in MobileShell
 const MOBILE_BEATS: Beat[] = [
-  {
-    selector: '[data-coach="nation-card"]',
-    label: 'RÈGLE 1 · 4',
-    text: 'Chaque carte = une équipe nationale. Elle gagne → prix ▲. Elle perd → le vainqueur absorbe 40% de sa valeur.',
-    tip: 'bottom',
-  },
-  {
-    selector: '[data-coach="cash-stat"]',
-    label: 'RÈGLE 2 · 4',
-    text: 'Quand une équipe que tu détiens se qualifie (R32, R16, QF…), un dividende atterrit automatiquement dans ton cash.',
-    tip: 'bottom',
-  },
-  {
-    selector: '[data-coach="play-btn"]',
-    label: 'RÈGLE 3 · 4',
-    text: "Le marché gèle avant chaque match. Ce bouton lance la journée — trade avant pour ne pas rater les mouvements de prix.",
-    tip: 'top',
-  },
-  {
-    selector: '[data-coach="nation-card"] button',
-    label: 'RÈGLE 4 · 4 — DERNIÈRE',
-    text: 'Acheter est gratuit. Vendre coûte 10% (groupes) ou 5% (KO). Maintenant → choisis une équipe et lance-toi !',
-    tip: 'top',
-  },
+  { selector: '[data-coach="nation-card"]',        labelKey: 'mobile.rule1Label', textKey: 'mobile.rule1Text', tip: 'bottom' },
+  { selector: '[data-coach="cash-stat"]',          labelKey: 'mobile.rule2Label', textKey: 'mobile.rule2Text', tip: 'bottom' },
+  { selector: '[data-coach="play-btn"]',           labelKey: 'mobile.rule3Label', textKey: 'mobile.rule3Text', tip: 'top'    },
+  { selector: '[data-coach="nation-card"] button', labelKey: 'mobile.rule4Label', textKey: 'mobile.rule4Text', tip: 'top'    },
 ];
 
 interface Props {
@@ -75,6 +34,7 @@ const PAD = 10;
 const TIP_W = 280;
 
 export default function CoachMarkOverlay({ shell, onDone }: Props) {
+  const t = useTranslations('coachMark');
   const beats = shell === 'browser' ? BROWSER_BEATS : MOBILE_BEATS;
   const [step,    setStep]    = useState(0);
   const [rect,    setRect]    = useState<DOMRect | null>(null);
@@ -96,24 +56,20 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
     let tipTop: number;
     if (beat.tip === 'bottom') {
       tipTop = r.bottom + PAD + 16;
-      // If tooltip would go off bottom, flip to above
       if (tipTop + TIP_H > window.innerHeight - 20) {
         tipTop = r.top - PAD - TIP_H - 16;
       }
     } else {
       tipTop = r.top - PAD - TIP_H - 16;
-      // If tooltip would go off top, flip to below
       if (tipTop < 20) {
         tipTop = r.bottom + PAD + 16;
       }
     }
-    // Final clamp to viewport
     tipTop = Math.max(12, Math.min(tipTop, window.innerHeight - TIP_H - 12));
 
     setTipPos({ top: tipTop, left: tipLeft });
   }, [beat]);
 
-  // Re-measure on step change or resize — longer delay on first beat (tab switch needs to render)
   useEffect(() => {
     const timeout = setTimeout(measure, step === 0 ? 200 : 80);
     window.addEventListener('resize', measure);
@@ -132,7 +88,6 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
 
   const isLast = step === beats.length - 1;
 
-  // Spotlight rect with padding
   const sp = rect ? {
     left:   rect.left   - PAD,
     top:    rect.top    - PAD,
@@ -140,12 +95,10 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
     height: rect.height + PAD * 2,
   } : null;
 
-  // Portal to document.body — escapes any overflow:hidden parent (mobile Safari fix)
   if (typeof document === 'undefined') return null;
 
   return createPortal(
     <div style={o.root} onClick={onDone}>
-      {/* Spotlight: transparent box + box-shadow dims everything outside */}
       {sp && (
         <div
           style={{
@@ -163,16 +116,13 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
         />
       )}
 
-      {/* Fallback dim when element not found */}
       {!sp && <div style={o.dimFallback} />}
 
-      {/* Tooltip */}
       {tipPos && (
         <div
           style={{ ...o.tip, top: tipPos.top, left: tipPos.left, width: TIP_W }}
           onClick={e => e.stopPropagation()}
         >
-          {/* Arrow */}
           {sp && (
             <div style={{
               ...o.arrow,
@@ -182,8 +132,8 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
             }} />
           )}
 
-          <div style={o.tipLabel}>{beat.label}</div>
-          <div style={o.tipText}>{beat.text}</div>
+          <div style={o.tipLabel}>{t(beat.labelKey as Parameters<typeof t>[0])}</div>
+          <div style={o.tipText}>{t(beat.textKey as Parameters<typeof t>[0])}</div>
           <div style={o.tipFoot}>
             <div style={o.dots}>
               {beats.map((_, i) => (
@@ -191,15 +141,14 @@ export default function CoachMarkOverlay({ shell, onDone }: Props) {
               ))}
             </div>
             <button style={o.gotIt} onClick={advance}>
-              {isLast ? 'TRADER →' : 'COMPRIS →'}
+              {isLast ? t('trade') : t('gotIt')}
             </button>
           </div>
         </div>
       )}
 
-      {/* Skip */}
       <button style={o.skip} onClick={onDone}>
-        Passer le tutoriel
+        {t('skip')}
       </button>
     </div>,
     document.body,
