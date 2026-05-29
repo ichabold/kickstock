@@ -136,7 +136,7 @@ function HomeView({ onTrade, onNationClick, onMatchClick }: {
       <div className="home-l">
         {prevResults.length > 0 && (
           <>
-            <div className="day-hdr"><span className="dot" style={{background:'#555'}}/>JOURNÉE PRÉCÉDENTE · {prevDay?.label}</div>
+            <div className="day-hdr"><span className="dot" style={{background:'var(--muted)'}}/>JOURNÉE PRÉCÉDENTE · {prevDay?.label}</div>
             <div className="matches-scroll">
               {prevResults.map((r, i) => {
                 const winA = r.res === 'A', winB = r.res === 'B';
@@ -1048,7 +1048,6 @@ export default function BrowserShell() {
               onResults={results => { setAnimResults(results); setShowAnim(true); }}
               onNoResults={() => setView('market')}
             />
-            {!day && <button className="reset-btn" onClick={resetGame}>🔄 RESET</button>}
           </div>
         </header>
 

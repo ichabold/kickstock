@@ -1,1569 +1,1435 @@
 # KICKSTOCK — CAHIER DE TESTS COMPLET
-**Version :** 1.0.0  
-**Date de rédaction :** 2026-05-26  
+**Version :** 2.0.0  
+**Date de mise à jour :** 2026-05-29  
 **Périmètre :** Monorepo Phase 2 — `apps/web` · `packages/*` · Base de données Supabase  
-**Méthode :** Tests unitaires · Tests d'intégration · Tests de bout en bout · Audit sécurité · QA UI/UX  
-**Outil de référence :** Ce document est la feuille de route unique pour valider chaque couche de l'application avant mise en production.
+**Méthode :** Tests unitaires · Tests d'intégration · Tests de bout en bout · Audit sécurité · QA UI/UX
+
+> **Note de version 2.0** : Mise à jour complète sur base du code actuel. Principaux changements reflétés : mode offline-first (`localGameStore` + `NEXT_PUBLIC_OFFLINE_MODE`), nouveau flux d'authentification invité (pseudo + Cloudflare Turnstile + rate limiting), routes auth (`/api/auth/guest`, `/api/auth/check-pseudo`, `/api/auth/check-email`, `/api/auth/set-username`), codes d'erreur structurés dans `/api/trade`, UUID v4 validé dans `/api/game/state`, ETag/304 sur `/api/game/state`, correction des taux de taxe (`calcTax` : 10 % groupes / 5 % KO), `MechanicsContract` implémenté, Sentry actif sur les 3 routes API, migration invité→compte OAuth (`migrate_guest_to_user`).
 
 ---
 
 ## TABLE DES MATIÈRES
 
-1. [Infrastructure & Repo (Qualité & Build)](#1-infrastructure--repo)
-2. [Sécurité & Isolation (Focus Supabase)](#2-sécurité--isolation)
+1. [Infrastructure & Repo](#1-infrastructure--repo)
+2. [Sécurité & Isolation](#2-sécurité--isolation)
 3. [Tests Fonctionnels Métier](#3-tests-fonctionnels-métier)
-4. [Compatibilité UI/UX (Browser vs Mobile)](#4-compatibilité-uiux)
+4. [Compatibilité UI/UX](#4-compatibilité-uiux)
 
 ---
 
-## Conventions du document
+## Conventions
 
 | Statut | Signification |
 |--------|---------------|
-| `[ ]` | Test non exécuté |
-| `[x]` | Test passé |
-| `[!]` | Test échoué — anomalie ouverte |
-| `[~]` | Test partiellement validé — contre-mesure en attente |
+| `[ ]` | Non exécuté |
+| `[x]` | Passé |
+| `[!]` | Échoué — anomalie ouverte |
+| `[~]` | Partiellement validé — action en cours |
 
-**Sévérité des anomalies :**
-- 🔴 **BLOQUANT** — empêche une fonctionnalité critique, mise en production interdite
-- 🟠 **MAJEUR** — dégradation significative, doit être corrigé avant release
-- 🟡 **MINEUR** — inconfort utilisateur, peut passer en suivi post-release
-- 🔵 **COSMÉTIQUE** — problème visuel sans impact fonctionnel
+**Sévérités :**
+- 🔴 **BLOQUANT** — mise en production interdite
+- 🟠 **MAJEUR** — à corriger avant release
+- 🟡 **MINEUR** — suivi post-release acceptable
+- 🔵 **COSMÉTIQUE** — aucun impact fonctionnel
 
 ---
 
 ## 1. INFRASTRUCTURE & REPO
 
-### 1.1 Validation de la structure Monorepo
+### 1.1 Structure du Monorepo
 
-#### 1.1.1 Vérification de l'arbre de packages déclarés
+#### 1.1.1 Vérification de l'arbre de packages
 
-**Objectif :** S'assurer que `pnpm-workspace.yaml` reconnaît tous les packages et qu'aucun n'est orphelin.
+**Objectif :** `pnpm-workspace.yaml` (`apps/*`, `packages/*`) reconnaît les quatre workspaces.
 
 ```bash
-# Commande de référence
 pnpm ls -r --depth 0
 ```
 
 **Résultat attendu :**
 ```
 kickstock (root)
-├── web @ apps/web
-├── @kickstock/constants @ packages/constants
+├── web                    @ apps/web
+├── @kickstock/constants   @ packages/constants
 ├── @kickstock/game-engine @ packages/game-engine
-└── @kickstock/types @ packages/types
+└── @kickstock/types       @ packages/types
 ```
-
-**Cas de défaillance :** Un package absent de la liste signifie que `pnpm-workspace.yaml` ne le couvre pas ou que son `package.json` a un `name` incorrect.
 
 ---
 
-#### 1.1.2 Isolation des packages — Imports croisés illicites
+#### 1.1.2 Acyclicité du graphe de dépendances
 
-**Objectif :** Vérifier qu'aucun package interne n'importe directement depuis le dossier `apps/` ou depuis un autre package en passant par un chemin relatif hors-workspace.
-
-**Procédure :**
-
-```bash
-# Détecter les imports relatifs suspects dans les packages
-grep -r "from '\.\.\/\.\.\/apps" packages/
-grep -r "require('\.\.\/\.\.\/apps" packages/
+**Hiérarchie obligatoire :**
 ```
-
-**Résultat attendu :** Aucune ligne retournée. Chaque package ne doit référencer que ses propres sources ou d'autres `@kickstock/*` via leur nom de package.
-
-**Cas de défaillance :** Un import tel que `from '../../apps/web/lib/...'` introduit un couplage ascendant qui casse le modèle de dépendances du monorepo.
-
----
-
-#### 1.1.3 Vérification du graphe de dépendances (`@kickstock/types` comme source de vérité)
-
-**Objectif :** Garantir que le flux de dépendances est acyclique et respecte la hiérarchie suivante :
-
-```
-@kickstock/types  (aucune dépendance interne)
-       ↓
-@kickstock/constants  (importe @kickstock/types)
-       ↓
-@kickstock/game-engine  (importe @kickstock/types + @kickstock/constants)
-       ↓
-apps/web  (importe les trois packages)
+@kickstock/types  →  @kickstock/constants  →  @kickstock/game-engine  →  apps/web
 ```
 
 **Procédure :**
-
 ```bash
-# Vérifier que @kickstock/types n'importe aucun autre package interne
+# @kickstock/types ne doit importer aucun autre package interne
 grep -r "@kickstock/" packages/types/src/
 
-# Vérifier que @kickstock/constants n'importe pas game-engine
+# @kickstock/constants ne doit pas importer game-engine
 grep -r "@kickstock/game-engine" packages/constants/src/
 
-# Vérifier que @kickstock/game-engine n'importe pas apps/web
+# @kickstock/game-engine ne doit pas importer apps/web
 grep -r "from 'apps/" packages/game-engine/src/
 ```
 
-**Résultat attendu :** Les trois commandes ne retournent aucune ligne.
+**Résultat attendu :** Aucune ligne retournée pour les trois commandes.
 
 ---
 
-#### 1.1.4 Résolution des types TypeScript partagés
-
-**Objectif :** Valider que `LayoutType`, `Match`, `GameState`, `StoredMatchResult`, `Nation`, `CalendarDay` définis dans `@kickstock/types` sont correctement résolus dans tous les packages consommateurs.
-
-**Procédure :**
+#### 1.1.3 Type-check global
 
 ```bash
 pnpm -r type-check
 ```
 
-**Résultat attendu :** Sortie `0 errors` pour chaque workspace. Toute erreur `TS2305: Module '@kickstock/types' has no exported member '...'` indique un export manquant ou un `tsconfig` mal configuré.
+**Résultat attendu :** `0 errors` pour chaque workspace. Une erreur `TS2305` sur `@kickstock/types` indique un export manquant ou un `tsconfig` mal configuré.
 
 ---
 
-#### 1.1.5 Vérification de `tsconfig.base.json` — paths et composite
+#### 1.1.4 Isolation de compilabilité par package
 
-**Objectif :** Valider que le fichier `tsconfig.base.json` à la racine est référencé par les `tsconfig.json` de chaque package et que les `paths` sont cohérents.
+```bash
+pnpm --filter @kickstock/types build
+pnpm --filter @kickstock/constants build
+pnpm --filter @kickstock/game-engine build
+```
+
+**Résultat attendu :** Exit code `0` pour chaque commande indépendamment, sans lancer `apps/web`.
+
+---
+
+#### 1.1.5 Cohérence des constantes financières entre TS et SQL
+
+**Objectif :** Les valeurs de `DIV_RATES` et `INIT_CASH` dans `@kickstock/constants` correspondent aux paramètres utilisés dans les RPC Supabase.
+
+**Référence `packages/constants/src/index.ts` :**
+```typescript
+DIV_RATES = { r32:0.10, r16:0.15, qf:0.20, sf:0.30, final:0.40, champion:0.60 }
+INIT_CASH = 10_000
+```
+
+**Procédure :** Vérifier dans `db/FULL_SETUP.sql` que le RPC `distribute_dividends` reçoit bien `p_rate = DIV_RATES[round]` et que `get_or_create_portfolio` initialise `cash = 10000`. Toute divergence entre les deux sources est un bug de distribution financière.
+
+---
+
+#### 1.1.6 Variable d'environnement `NEXT_PUBLIC_OFFLINE_MODE`
+
+**Objectif :** Le mode de jeu (`localGameStore` vs `onlineGameStore`) est contrôlé par `NEXT_PUBLIC_OFFLINE_MODE`. Vérifier que le store actif correspond à la variable d'environnement déployée.
 
 **Procédure :**
 
 ```bash
-# Vérifier que chaque package hérite du tsconfig de base
-cat packages/game-engine/tsconfig.json | grep -E "extends|paths"
-cat packages/constants/tsconfig.json   | grep -E "extends|paths"
-cat apps/web/tsconfig.json             | grep -E "extends|paths"
+# Vérifier la valeur déployée sur Vercel
+# En local, vérifier apps/web/.env.local
+grep "NEXT_PUBLIC_OFFLINE_MODE" apps/web/.env.local apps/web/.env.production 2>/dev/null
 ```
 
-**Résultat attendu :** Chaque fichier contient `"extends": "../../tsconfig.base.json"` (ou chemin équivalent). Les `paths` dans `apps/web` doivent mapper `@kickstock/*` vers les répertoires locaux des packages pour que le dev server résolve correctement sans build préalable.
+**Comportements attendus :**
+
+| `NEXT_PUBLIC_OFFLINE_MODE` | Store actif | Trades | Simulation | Leaderboard |
+|---------------------------|-------------|--------|-----------|-------------|
+| `true` (ou non défini) | `localGameStore` | Client-side, localStorage | Client-side | `syncBestScore` vers Supabase |
+| `false` | `onlineGameStore` | Via `/api/trade` | Via `/api/game/advance` | Intégré |
+
+> **État actuel du code :** `gameStore.ts` ré-exporte `useLocalGameStore` — le mode offline est actif par défaut.
 
 ---
 
-### 1.2 Pipeline d'Intégration Continue
+### 1.2 Pipeline CI
 
-#### 1.2.1 Linting de l'ensemble du monorepo
-
-**Objectif :** Zéro erreur de lint sur les quatre workspaces en un seul appel depuis la racine.
-
-**Commande :**
+#### 1.2.1 Linting global
 
 ```bash
-pnpm lint
-# Équivalent à : pnpm -r lint
+pnpm lint   # équivalent à pnpm -r lint
 ```
 
-**Résultat attendu :** Tous les workspaces retournent `0 errors, 0 warnings` (ou `0 errors` si les warnings sont tolérés). La commande se termine avec exit code `0`.
-
-**Points de vigilance :**
-- Les règles `no-explicit-any` sont intentionnellement contournées avec `// eslint-disable-next-line` dans les routes API pour les appels RPC Supabase. Ces désactivations ponctuelles sont acceptables mais ne doivent pas proliférer.
-- Aucun import `@ts-ignore` sans commentaire explicatif ne doit subsister.
+**Résultat attendu :** Zéro erreur, exit code `0`. Les `// eslint-disable-next-line @typescript-eslint/no-explicit-any` présents dans les routes API (contournement du typage Supabase) sont documentés et acceptables ponctuellement — ils ne doivent pas proliférer.
 
 ---
 
-#### 1.2.2 Build de l'application Next.js sans erreur
-
-**Objectif :** Produire un build de production valide de `apps/web`.
-
-**Commande :**
+#### 1.2.2 Build de production
 
 ```bash
-pnpm build
-# Équivalent à : pnpm --filter web build
+pnpm build   # équivalent à pnpm --filter web build
 ```
 
 **Résultat attendu :**
-- Sortie `✓ Compiled successfully`
-- Aucune erreur TypeScript dans la phase de compilation
-- Toutes les routes API (`/api/trade`, `/api/game/state`, `/api/game/advance`, `/api/market`) apparaissent dans le récapitulatif des routes avec le flag `(Dynamic)`
-- La taille du bundle client est cohérente avec la session précédente (absence de régression de poids)
-
-**Vérifications post-build :**
-
-```bash
-# Taille des chunks principaux (référence à établir à la première validation)
-du -sh .next/static/chunks/
-```
+- `✓ Compiled successfully`
+- Aucune erreur TypeScript à la compilation
+- Toutes les routes API apparaissent avec le flag `(Dynamic)` : `/api/trade`, `/api/game/state`, `/api/game/advance`, `/api/market`, `/api/auth/guest`, `/api/auth/check-pseudo`, `/api/auth/check-email`, `/api/auth/set-username`
+- `export const maxDuration = 60` visible sur `/api/game/advance` (Vercel Fluid Functions)
 
 ---
 
-#### 1.2.3 Build incrémental des packages — isolation de compilabilité
+### 1.3 Tests unitaires `@kickstock/game-engine`
 
-**Objectif :** Chaque package doit pouvoir se compiler indépendamment, sans dépendre d'un build préalable de `apps/web`.
-
-**Procédure :**
-
-```bash
-# Compiler uniquement game-engine (sans lancer le build web)
-pnpm --filter @kickstock/game-engine build
-
-# Compiler uniquement constants
-pnpm --filter @kickstock/constants build
-
-# Compiler uniquement types
-pnpm --filter @kickstock/types build
-```
-
-**Résultat attendu :** Exit code `0` pour chaque commande, indépendamment. Un échec sur `@kickstock/game-engine` sans que `apps/web` soit lancé révèle une dépendance implicite non déclarée.
-
----
-
-#### 1.2.4 Suite de tests unitaires — `@kickstock/game-engine`
-
-**Objectif :** Valider la couverture des fonctions pures du moteur de jeu.
-
-**Commande :**
+#### 1.3.1 Exécution de la suite existante
 
 ```bash
 pnpm --filter @kickstock/game-engine test
 ```
 
-**Cas de test à couvrir dans les tests unitaires du package :**
+**Couverture actuelle (`engine.test.ts`) — valider que tous ces tests passent :**
 
-| Fonction | Scénario | Input | Output attendu |
-|----------|----------|-------|---------------|
-| `applyResult` | Victoire de A | `pA=100, pB=50, res='A'` | `[125, 25]` |
-| `applyResult` | Victoire de B | `pA=100, pB=50, res='B'` | `[50, 125]` |
-| `applyResult` | Match nul | `pA=100, pB=50, res='draw'` | `[112.5, 75]` |
-| `applyResult` | Prix plancher | `pA=10, pB=10, res='B'` | `[5, 15]` — ne doit jamais retourner ≤ 0 |
-| `applyResult` | Arrondi à 1 décimale | `pA=33, pB=17, res='A'` | Vérifie `Math.round(x * 10) / 10` |
-| `deriveGroupStandings` | Tri par points | 4 équipes, scores variés | L'équipe avec 9 pts en tête |
-| `deriveGroupStandings` | Égalité sur points | 2 équipes à 4 pts | Départage goal difference |
-| `deriveGroupStandings` | Filtre éliminés | Équipe dans `eliminated[]` | Absente du classement retourné |
-| `buildR32Pool` | Sélection 32 équipes | Groupes A–L complétés | 32 entrées sans doublon |
-| `buildGroupStandingsUI` | Phase de groupes uniquement | `dayIndex >= 17` | Résultats KO ignorés |
+| Suite | Cas | Input | Résultat attendu |
+|-------|-----|-------|-----------------|
+| `applyResult` | Victoire A symétrique | `(100, 100, 'A')` | `[150, 50]` |
+| `applyResult` | Match nul | `(100, 100, 'draw')` | `[125, 125]` |
+| `applyResult` | Victoire A asymétrique | `(200, 50, 'A')` | `[225, 25]` |
+| `applyResult` | Prix plancher | `(1000, 10, 'A')` | `nB >= 1` |
+| `calcTax` | Phase groupes 10% min 10 KC | `(200, 100, false)` | `20` |
+| `calcTax` | Phase groupes minimum | `(50, 50, false)` | `10` |
+| `calcTax` | Phase KO 5% min 10 KC | `(200, 100, true)` | `10` |
+| `calcTax` | Phase KO au-dessus du min | `(300, 100, true)` | `15` |
+| `calcTax` | Nation éliminée (price=1) | `(100, 1, false)` | `0` |
+| `calcDividend` | R32 10% | `(200, 'r32')` | `20` |
+| `calcDividend` | Champion 60% | `(500, 'champion')` | `300` |
+| `calcDividend` | Clé inconnue | `(100, 'unknown')` | `0` |
+| `simulate` | KO : jamais de draw | 50 itérations, `isKO=true` | Résultat toujours `'A'` ou `'B'` |
+| `simulate` | Groupes : draw possible | 200 itérations, forces égales | Set contient `'draw'` |
+| `simulate` | Favori gagne plus souvent | 1000 itérations, `str=95 vs 40` | Favori gagne > 70 % |
 
 ---
 
-#### 1.2.5 Vérification du `DIV_RATES` et de `INIT_CASH` — cohérence constantes/DB
+#### 1.3.2 Cas manquants à ajouter
 
-**Objectif :** S'assurer que les taux de dividendes définis dans `@kickstock/constants` correspondent exactement aux valeurs utilisées par le RPC `distribute_dividends`.
+Ces cas ne sont pas couverts dans `engine.test.ts` et représentent des risques de régression :
 
-**Référence constantes :**
-```typescript
-DIV_RATES = { r32: 0.10, r16: 0.15, qf: 0.20, sf: 0.30, final: 0.40, champion: 0.60 }
-INIT_CASH = 10_000
-```
-
-**Procédure :** Lire le SQL de `distribute_dividends` dans `db/FULL_SETUP.sql` et comparer les valeurs `p_rate` passées depuis `apps/web/app/api/game/advance/route.ts` avec `DIV_RATES[round]`. Toute divergence est un bug de distribution financière.
+| Fonction | Cas à ajouter | Justification |
+|----------|--------------|---------------|
+| `applyResult` | Arrondi à 1 décimale | `applyResult(33, 17, 'A')` — vérifie `Math.round(x * 10) / 10` |
+| `calcTax` | Price = 0 (edge) | `calcTax(100, 0, false)` doit retourner `0` comme `price <= 1` |
+| `calcDividend` | Arrondi | `calcDividend(33, 'r32')` → `3.3` (pas `3.300000001`) |
+| `deriveGroupStandings` | Tri multi-critères | Égalité de points → goal difference → buts marqués |
+| `buildR32Pool` | 32 équipes uniques | Retourne exactement 32 entrées sans doublon |
+| `simulate` | Résultat SF / 3rd | Phase `SF` : draw possible en 90min, KO ensuite |
 
 ---
 
 ## 2. SÉCURITÉ & ISOLATION
 
-### 2.1 Stratégie de validation des règles RLS Supabase
+### 2.1 Statut des vulnérabilités identifiées
 
-> **Principe :** Chaque test RLS est exécuté avec deux clients Supabase distincts : un client authentifié via la clé anon (simulant l'utilisateur Y) et un client authentifié sous l'identité de l'utilisateur X. On vérifie que Y ne peut pas voir ni modifier les données de X.
+| ID | Titre | Sévérité | Statut actuel |
+|----|-------|----------|--------------|
+| CRITIQUE-1 | `/api/game/advance` sans authentification | 🔴 BLOQUANT | **Non corrigé** — aucun `X-Advance-Secret` ni vérification de rôle dans le code actuel |
+| CRITIQUE-2 | RLS `portfolios_select_device` expose tous les portfolios anonymes | 🔴 BLOQUANT | **À vérifier** — policy toujours présente dans `db/FULL_SETUP.sql` ; les routes API utilisent le client admin (contournement partiel), mais la fuite via la clé anon reste active |
+| HAUTE-1 | Hijacking via `X-Device-ID` non validé | 🟠 MAJEUR | **Partiellement corrigé** — UUID v4 validé dans `/api/game/state` et `/api/auth/guest` ; **non validé dans `/api/trade`** |
+| HAUTE-2 | Vue `leaderboard` expose `portfolios.id` | 🟠 MAJEUR | **À vérifier** — dépend de si la vue a été recréée sans `p.id` en base |
+| MOYENNE | Messages d'erreur internes retournés au client | 🟡 MINEUR | **Corrigé** — les 3 routes retournent désormais `{ code: 'INTERNAL_ERROR', error: 'Erreur interne' }` en 500 |
 
-#### 2.1.1 Environnement de test RLS
+> **Règle de release :** Les vulnérabilités CRITIQUE-1 et CRITIQUE-2 doivent être corrigées et leurs tests respectifs doivent passer `[x]` avant toute mise en production.
 
-**Prérequis :** Deux comptes de test créés dans l'environnement Supabase de staging :
+---
 
-```
-Utilisateur A : test-user-a@kickstock.test  (UUID connu, noté UID_A)
-Utilisateur B : test-user-b@kickstock.test  (UUID connu, noté UID_B)
-```
+### 2.2 Tests RLS Supabase
 
-Chaque utilisateur dispose d'un portfolio initialisé à 10 000 KC et d'au moins une position ouverte (ex : 10 actions BRA pour A, 5 actions FRA pour B).
-
-**Client de test :**
+> **Prérequis communs :** Deux comptes de test dans l'environnement de staging — `UID_A` et `UID_B` — chacun avec un portfolio initialisé et au moins une position ouverte.
 
 ```javascript
-import { createClient } from '@supabase/supabase-js';
-
-// Client authentifié sous l'identité B (la "curiosité" ou l'attaque)
+// Client B (l'attaquant simulé)
 const sbB = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-await sbB.auth.signInWithPassword({ email: 'test-user-b@kickstock.test', password: '...' });
+await sbB.auth.signInWithPassword({ email: 'test-b@kickstock.test', password: '...' });
 
-// Client authentifié sous l'identité A (la "victime")
-const sbA = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-await sbA.auth.signInWithPassword({ email: 'test-user-a@kickstock.test', password: '...' });
-```
-
----
-
-#### 2.1.2 RLS-01 — Isolation lecture des portfolios
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-01 |
-| **Table** | `portfolios` |
-| **Politique** | `portfolios_select_own` (`auth.uid() = user_id`) |
-| **Objectif** | L'utilisateur B ne peut pas lire le portfolio de A |
-
-**Procédure :**
-
-```javascript
-// Exécuté avec le client de B
-const { data, error } = await sbB
-  .from('portfolios')
-  .select('*')
-  .eq('user_id', UID_A);
-```
-
-**Résultat attendu :** `data` est un tableau vide `[]`. La politique RLS filtre silencieusement la ligne — aucune erreur n'est levée, mais aucune donnée n'est retournée.
-
-**Résultat de défaillance :** Si `data` contient le portfolio de A avec son `cash`, `avg_cost` ou `tx_log`, la politique est défaillante.
-
-> ⚠️ **Vulnérabilité connue CRITIQUE-2 :** La politique `portfolios_select_device` (`device_id IS NOT NULL`) expose tous les portfolios anonymes. Ce test DOIT échouer tant que cette politique existe. La correction est `DROP POLICY IF EXISTS "portfolios_select_device" ON portfolios;`. Valider ce test **après** correction.
-
----
-
-#### 2.1.3 RLS-02 — Isolation lecture des positions
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-02 |
-| **Table** | `positions` |
-| **Politique** | `positions_select_own` (`auth.uid() = user_id`) |
-| **Objectif** | B ne peut pas lire les positions d'A |
-
-**Procédure :**
-
-```javascript
-const { data } = await sbB
-  .from('positions')
-  .select('*')
-  .eq('user_id', UID_A);
-```
-
-**Résultat attendu :** `data = []`.
-
----
-
-#### 2.1.4 RLS-03 — Isolation lecture des transactions
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-03 |
-| **Table** | `transactions` |
-| **Politique** | `transactions_select_own` (via portfolio_id) |
-| **Objectif** | B ne peut pas lire l'historique de trades d'A |
-
-**Procédure :**
-
-```javascript
-// Récupérer d'abord le portfolio_id de A (que B ne devrait pas connaître)
-// Ce test simule un attaquant qui aurait obtenu l'UUID via une autre faille
-const PORTFOLIO_ID_A = '...(uuid connu du testeur)...';
-
-const { data } = await sbB
-  .from('transactions')
-  .select('*')
-  .eq('portfolio_id', PORTFOLIO_ID_A);
-```
-
-**Résultat attendu :** `data = []`. La politique `transactions_select_own` vérifie que `portfolio_id IN (SELECT id FROM portfolios WHERE user_id = auth.uid())` — seule la session de A peut valider cette sous-requête.
-
----
-
-#### 2.1.5 RLS-04 — Tentative de modification du portfolio d'autrui (UPDATE)
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-04 |
-| **Table** | `portfolios` |
-| **Politique** | `portfolios_update_own` (`auth.uid() = user_id`) |
-| **Objectif** | B ne peut pas injecter du cash dans le portfolio de A |
-
-**Procédure :**
-
-```javascript
-const { data, error } = await sbB
-  .from('portfolios')
-  .update({ cash: 9999999 })
-  .eq('user_id', UID_A);
-```
-
-**Résultat attendu :** `data = []` (0 lignes modifiées). Aucune erreur levée, mais le UPDATE ne modifie aucune ligne car la politique filtre la cible.
-
-**Vérification complémentaire :** Relire le cash du portfolio A avec le client de A et confirmer qu'il est inchangé.
-
----
-
-#### 2.1.6 RLS-05 — Tentative d'INSERT de trade au nom d'autrui
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-05 |
-| **Table** | `trades` |
-| **Politique** | `trades_insert_own` (`auth.uid() = user_id`) |
-| **Objectif** | B ne peut pas insérer un trade avec `user_id = UID_A` |
-
-**Procédure :**
-
-```javascript
-const { data, error } = await sbB
-  .from('trades')
-  .insert({
-    user_id:    UID_A,
-    nation_id:  'BRA',
-    mode:       'sell',
-    quantity:   100,
-    price:      200,
-    tax:        0,
-    net_amount: 20000,
-    day_index:  5,
-  });
-```
-
-**Résultat attendu :** `error` non null avec code `42501` (insufficient privilege) ou le INSERT échoue silencieusement avec `data = []`.
-
----
-
-#### 2.1.7 RLS-06 — Isolation des dividendes
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-06 |
-| **Table** | `dividends` |
-| **Politique** | `dividends_select_own` (via portfolio_id) |
-| **Objectif** | B ne peut pas voir les dividendes perçus par A |
-
-**Procédure :**
-
-```javascript
-const { data } = await sbB
-  .from('dividends')
-  .select('*')
-  .eq('portfolio_id', PORTFOLIO_ID_A);
-```
-
-**Résultat attendu :** `data = []`.
-
----
-
-#### 2.1.8 RLS-07 — Isolation des holdings
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-07 |
-| **Table** | `holdings` |
-| **Politique** | `holdings_select_own` (via portfolio_id) |
-| **Objectif** | B ne peut pas lire les positions en portefeuille d'A |
-
-**Procédure :**
-
-```javascript
-const { data } = await sbB
-  .from('holdings')
-  .select('*')
-  .eq('portfolio_id', PORTFOLIO_ID_A);
-```
-
-**Résultat attendu :** `data = []`.
-
----
-
-#### 2.1.9 RLS-08 — Lectures publiques autorisées
-
-**Objectif :** Confirmer que les tables à lecture publique sont bien accessibles sans authentification, et que seules ces tables le sont.
-
-**Tables publiques :**
-
-```javascript
-// Avec un client non authentifié
+// Client non authentifié
 const sbAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+```
 
-const tables = ['nations', 'price_history', 'game_state', 'nation_prices',
-                'group_standings', 'knockout_pools', 'matches', 'groups'];
+---
 
-for (const table of tables) {
-  const { data, error } = await sbAnon.from(table).select('*').limit(1);
-  // Résultat attendu : data non null, error null
+#### RLS-01 — Isolation lecture des `portfolios`
+
+**Politique :** `portfolios_select_own` (`auth.uid() = user_id`)
+
+```javascript
+const { data } = await sbB.from('portfolios').select('*').eq('user_id', UID_A);
+```
+
+**Résultat attendu :** `data = []`.
+
+> ⚠️ **CRITIQUE-2 non corrigé :** Si la politique `portfolios_select_device` (`device_id IS NOT NULL`) est toujours active, tous les portfolios avec un `device_id` sont visibles. Ce test **échouera** tant que la politique n'est pas supprimée.
+
+---
+
+#### RLS-02 — Isolation lecture des `positions`
+
+```javascript
+const { data } = await sbB.from('positions').select('*').eq('user_id', UID_A);
+```
+**Résultat attendu :** `data = []`.
+
+---
+
+#### RLS-03 — Isolation lecture des `transactions`
+
+```javascript
+const { data } = await sbB.from('transactions').select('*').eq('portfolio_id', PORTFOLIO_ID_A);
+```
+**Résultat attendu :** `data = []`. La politique sous-requête (`portfolio_id IN (SELECT id FROM portfolios WHERE user_id = auth.uid())`) ne peut être satisfaite que par la session A.
+
+---
+
+#### RLS-04 — Tentative de modification du portfolio d'autrui
+
+```javascript
+const { data } = await sbB.from('portfolios').update({ cash: 9999999 }).eq('user_id', UID_A);
+```
+**Résultat attendu :** `data = []` — 0 ligne modifiée. Vérifier via le client A que le cash est inchangé.
+
+---
+
+#### RLS-05 — Tentative d'INSERT de trade au nom d'autrui
+
+```javascript
+const { error } = await sbB.from('trades').insert({
+  user_id: UID_A, nation_id: 'BRA', mode: 'sell',
+  quantity: 100, price: 200, tax: 0, net_amount: 20000, day_index: 5,
+});
+```
+**Résultat attendu :** `error` non null (code `42501`) ou 0 ligne insérée.
+
+---
+
+#### RLS-06 — Isolation des `dividends`
+
+```javascript
+const { data } = await sbB.from('dividends').select('*').eq('portfolio_id', PORTFOLIO_ID_A);
+```
+**Résultat attendu :** `data = []`.
+
+---
+
+#### RLS-07 — Isolation des `holdings`
+
+```javascript
+const { data } = await sbB.from('holdings').select('*').eq('portfolio_id', PORTFOLIO_ID_A);
+```
+**Résultat attendu :** `data = []`.
+
+---
+
+#### RLS-08 — Lectures publiques autorisées
+
+```javascript
+const publicTables = ['nations', 'price_history', 'game_state', 'nation_prices',
+                      'group_standings', 'knockout_pools', 'matches', 'groups'];
+for (const t of publicTables) {
+  const { data, error } = await sbAnon.from(t).select('*').limit(1);
+  // Attendu : data non null, error null
 }
 ```
 
 **Tables privées — doit retourner `[]` sans authentification :**
-
 ```javascript
-const privateTables = ['portfolios', 'positions', 'trades', 'holdings',
-                       'transactions', 'dividends', 'profiles'];
-
-for (const table of privateTables) {
-  const { data } = await sbAnon.from(table).select('*').limit(5);
-  // Résultat attendu : data = [] (pas d'erreur mais aucune donnée)
+const privateTables = ['portfolios','positions','trades','holdings',
+                       'transactions','dividends','profiles'];
+for (const t of privateTables) {
+  const { data } = await sbAnon.from(t).select('*').limit(5);
+  // Attendu : data = []
 }
 ```
 
 ---
 
-#### 2.1.10 RLS-09 — Validation de la vue `leaderboard`
-
-**Objectif :** Confirmer que la vue `leaderboard` n'expose pas de données privées via la clé anon.
-
-**Procédure :**
+#### RLS-09 — Vue `leaderboard` — absence de `portfolios.id`
 
 ```javascript
 const { data } = await sbAnon.from('leaderboard').select('*');
 ```
 
-**Résultat attendu :** Les colonnes retournées sont uniquement `username`, `country`, `best_score`, `updated_at`. L'UUID de portfolio (`p.id`) ne doit pas apparaître dans le résultat.
+**Résultat attendu :** Les colonnes retournées sont `username`, `country`, `best_score`, `updated_at` uniquement. `p.id` (UUID de portfolio) ne doit pas apparaître.
 
-> ⚠️ **Vulnérabilité connue HAUTE-2 :** Si la vue originale n'a pas été corrigée, `p.id` apparaîtra dans les résultats. Ce test valide que la correction `CREATE OR REPLACE VIEW leaderboard ...` sans `p.id` a été appliquée.
+> ⚠️ **HAUTE-2 :** Si la vue n'a pas été recréée, `p.id` sera présent. Vérifier en SQL :
+> ```sql
+> SELECT column_name FROM information_schema.columns
+> WHERE table_name = 'leaderboard' ORDER BY ordinal_position;
+> ```
 
 ---
 
-#### 2.1.11 RLS-10 — Isolation des competitions (accès authentifiés uniquement)
-
-| Champ | Valeur |
-|-------|--------|
-| **ID** | RLS-10 |
-| **Table** | `competitions` |
-| **Politique** | `comp_select_authenticated` (`auth.role() = 'authenticated'`) |
-
-**Procédure :**
+#### RLS-10 — Accès aux `competitions` réservé aux authentifiés
 
 ```javascript
-// Client non authentifié
-const { data, error } = await sbAnon.from('competitions').select('*');
+const { data } = await sbAnon.from('competitions').select('*');
 ```
-
-**Résultat attendu :** `data = []`. Un utilisateur non connecté ne peut pas lire la liste des compétitions.
-
----
-
-### 2.2 Validation de l'Authentification
-
-#### 2.2.1 AUTH-01 — Comportement sur token JWT expiré
-
-**Objectif :** Vérifier que les routes API rejettent correctement une session expirée.
-
-**Procédure :**
-
-1. Obtenir un JWT valide pour un utilisateur de test via `sbA.auth.getSession()`.
-2. Manipuler manuellement le `exp` du payload pour qu'il soit dans le passé (ou attendre l'expiration réelle si `JWT_EXPIRY` est configuré court sur le projet Supabase de test).
-3. Envoyer une requête `POST /api/trade` avec ce token expiré dans le cookie de session.
-
-**Résultat attendu :** Le middleware Supabase SSR (`@supabase/ssr`) détecte l'expiration et tente un refresh silencieux via le `refresh_token`. Si le refresh échoue (refresh_token révoqué), `getUser()` retourne `null` et la route tombe en mode anonyme (`userId = null`). La route ne doit pas planter avec un 500 — elle doit continuer avec `p_user_id = null` en passant par le `device_id`.
-
-**Vérification complémentaire :** Confirmer qu'aucun détail du JWT expiré n'est loggé côté serveur avec des informations sensibles (email, UUID en clair dans les logs).
+**Résultat attendu :** `data = []` (politique `comp_select_authenticated` : `auth.role() = 'authenticated'`).
 
 ---
 
-#### 2.2.2 AUTH-02 — Déconnexion forcée et invalidation de session côté client
+### 2.3 Authentification
 
-**Objectif :** Après `supabase.auth.signOut()`, aucune requête vers les tables privées ne doit réussir.
+#### AUTH-01 — Cookies de session HttpOnly/Secure/SameSite
 
-**Procédure :**
+**Procédure :** Après connexion en production (HTTPS), inspecter les cookies `sb-*` dans DevTools → Application → Cookies.
 
-```javascript
-await sbA.auth.signOut();
-
-// Tentative immédiate post-logout
-const { data } = await sbA.from('portfolios').select('*');
-```
-
-**Résultat attendu :** `data = []`. Le cookie de session HttpOnly est supprimé par Supabase SSR lors du signOut — les requêtes suivantes sont des requêtes anon.
-
----
-
-#### 2.2.3 AUTH-03 — Attribut des cookies de session
-
-**Objectif :** Valider que les cookies de session Supabase sont `HttpOnly`, `Secure` et `SameSite=Lax`.
-
-**Procédure :**
-
-1. Ouvrir l'application en production (HTTPS).
-2. Ouvrir les DevTools → Application → Cookies.
-3. Identifier les cookies `sb-*` (Access Token et Refresh Token).
-
-**Résultat attendu :** Chaque cookie `sb-*` affiche :
-- `HttpOnly` : coché (non accessible via `document.cookie`)
+**Résultat attendu pour chaque cookie `sb-*` :**
+- `HttpOnly` : coché
 - `Secure` : coché (HTTPS uniquement)
 - `SameSite` : `Lax`
 
-**Test XSS complémentaire :**
+**Test XSS :**
+```javascript
+document.cookie // ne doit pas contenir les tokens Supabase
+```
+
+---
+
+#### AUTH-02 — Middleware : refresh de session silencieux
+
+**Objectif :** Le middleware (`apps/web/middleware.ts`) appelle `supabase.auth.getUser()` à chaque requête pour rafraîchir les tokens expirés avant qu'ils n'atteignent les routes.
+
+**Procédure :** Simuler une session proche de l'expiration. Envoyer une requête à `/api/game/state`. Observer que le middleware a rafraîchi le cookie `sb-access-token` dans la réponse.
+
+**Résultat attendu :** La réponse contient `Set-Cookie` avec un nouveau `sb-access-token` si le token était proche de l'expiration.
+
+---
+
+#### AUTH-03 — Middleware : redirection des utilisateurs connectés hors des pages auth
+
+**Procédure :** Avec une session active, naviguer vers `/login` et `/register`.
+
+**Résultat attendu :** Redirection HTTP 307 vers `/`. Les pages `/auth/callback` et `/auth/confirm` sont exclues du matcher du middleware et ne déclenchent pas ce comportement.
+
+---
+
+#### AUTH-04 — Déconnexion forcée
 
 ```javascript
-// Exécuté dans la console du navigateur — doit retourner undefined ou ne pas inclure les tokens
-document.cookie
-// Les cookies HttpOnly ne peuvent pas être lus via JavaScript
+await sbA.auth.signOut();
+const { data } = await sbA.from('portfolios').select('*');
 ```
+**Résultat attendu :** `data = []` immédiatement après `signOut()`.
 
 ---
 
-#### 2.2.4 AUTH-04 — Trigger `handle_new_user` — création automatique profil + portfolio
-
-**Objectif :** À la création d'un compte Supabase Auth, un profil et un portfolio sont automatiquement créés par le trigger `on_auth_user_created`.
+#### AUTH-05 — Trigger `handle_new_user` — création profil + portfolio
 
 **Procédure :**
-
-1. Créer un nouveau compte via `sbNew.auth.signUp({ email: 'newuser@test.com', password: '...', options: { data: { username: 'TestUser' } } })`.
-2. Lire immédiatement le profil et le portfolio avec le client admin.
-
+1. Créer un compte via `supabase.auth.signUp({ email, password, options: { data: { username: 'TestUser' } } })`.
+2. Vérifier en base :
 ```sql
--- Vérification SQL (Supabase SQL Editor)
-SELECT p.id, p.username, pf.cash, pf.created_at
-FROM profiles p
-JOIN portfolios pf ON pf.user_id = p.id
+SELECT p.id, p.username, pf.cash
+FROM profiles p JOIN portfolios pf ON pf.user_id = p.id
 WHERE p.id = '<new_user_id>';
 ```
-
-**Résultat attendu :**
-- 1 ligne dans `profiles` avec `username = 'TestUser'`
-- 1 ligne dans `portfolios` avec `cash = 10000.00`
-- Les deux lignes existent dans la même transaction (le trigger est `SECURITY DEFINER`)
+**Résultat attendu :** `username = 'TestUser'`, `cash = 10000.00`. Les deux lignes créées dans la même transaction ACID.
 
 ---
 
-### 2.3 Sécurisation de l'API de Trade
+### 2.4 Flux d'authentification invité
 
-#### 2.3.1 SEC-TRADE-01 — Protection de `/api/game/advance` par secret
-
-**Objectif :** Valider que la route `/api/game/advance` rejette toute requête sans le header `X-Advance-Secret` valide.
-
-> ⚠️ **Vulnérabilité connue CRITIQUE-1 :** Sans cette protection, n'importe quel client anonyme peut avancer le jeu pour tous les joueurs. Ce test valide que le correctif a été appliqué.
-
-**Procédure :**
-
-```bash
-# Test sans secret (doit être refusé)
-curl -s -X POST https://kickstock.app/api/game/advance \
-  -H "Content-Type: application/json" \
-  -H "X-Device-ID: fake-device-id" \
-  -d '{"dayIndex": 0}'
-```
-
-**Résultat attendu :** `HTTP 401` avec body `{ "error": "Unauthorized" }`.
-
-```bash
-# Test avec un faux secret (doit être refusé)
-curl -s -X POST https://kickstock.app/api/game/advance \
-  -H "Content-Type: application/json" \
-  -H "X-Device-ID: fake-device-id" \
-  -H "X-Advance-Secret: mauvais-secret" \
-  -d '{"dayIndex": 0}'
-```
-
-**Résultat attendu :** `HTTP 401`.
-
----
-
-#### 2.3.2 SEC-TRADE-02 — Validation du format UUID du `X-Device-ID`
-
-**Objectif :** L'API `/api/trade` doit rejeter tout `X-Device-ID` qui n'est pas un UUID v4 valide.
-
-> ⚠️ **Vulnérabilité connue HAUTE-1 :** Sans validation du format, un attaquant peut usurper l'identité d'un joueur en fournissant son `device_id`.
-
-**Procédure :**
-
-```bash
-# Injection SQL dans le device_id
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "Content-Type: application/json" \
-  -H "X-Device-ID: '; DROP TABLE portfolios;--" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":1}'
-
-# UUID invalide
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "Content-Type: application/json" \
-  -H "X-Device-ID: not-a-uuid" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":1}'
-
-# UUID v1 (non v4)
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "Content-Type: application/json" \
-  -H "X-Device-ID: 6ba7b810-9dad-11d1-80b4-00c04fd430c8" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":1}'
-```
-
-**Résultat attendu :** `HTTP 400` avec `{ "error": "Invalid device ID" }` pour les deux premiers cas. Le troisième cas (UUID v1) doit être évalué selon la regex implémentée : si la regex exige `4[0-9a-f]{3}` au 3e segment, l'UUID v1 sera également rejeté.
-
----
-
-#### 2.3.3 SEC-TRADE-03 — Anti double-dépense (atomicité du RPC `execute_trade`)
-
-**Objectif :** Deux requêtes de trade simultanées sur le même portfolio ne doivent pas débiter le cash deux fois.
-
-**Contexte technique :** Le RPC `execute_trade` utilise `FOR UPDATE` sur la ligne `portfolios` et la ligne `holdings`. PostgreSQL pose un verrou exclusif sur ces lignes pour la durée de la transaction, sérialisant les accès concurrents.
-
-**Procédure :**
-
-```bash
-# Lancer deux achats simultanés avec le même device_id
-# Portfolio initial : cash = 500 KC, BRA = 200 KC/action
-# Chaque achat : 2 actions × 200 KC = 400 KC
-
-DEVICE="xxxxxxxx-xxxx-xxxx-4xxx-xxxxxxxxxxxx"
-
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "X-Device-ID: $DEVICE" \
-  -H "Content-Type: application/json" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":2}' &
-
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "X-Device-ID: $DEVICE" \
-  -H "Content-Type: application/json" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":2}' &
-
-wait
-```
-
-**Résultat attendu :** L'une des deux requêtes réussit (`ok: true`, `new_cash: 100`). La seconde retourne `{ "error": "Fonds insuffisants" }` avec HTTP 422. Le cash final du portfolio est `100 KC` (500 − 400), pas `−300 KC`.
-
-**Vérification SQL :**
-
-```sql
-SELECT cash FROM portfolios WHERE device_id = 'xxxxxxxx-xxxx-xxxx-4xxx-xxxxxxxxxxxx';
--- Doit retourner 100.00, jamais une valeur négative
-```
-
----
-
-#### 2.3.4 SEC-TRADE-04 — Validation côté serveur : paramètres manquants ou invalides
-
-**Objectif :** La route `/api/trade` valide les paramètres avant d'appeler le RPC.
+#### AUTH-GUEST-01 — `GET /api/auth/check-pseudo` — disponibilité du pseudo
 
 **Cas à tester :**
 
 ```bash
-BASE_URL="https://kickstock.app/api/trade"
-DEVICE="xxxxxxxx-xxxx-xxxx-4xxx-xxxxxxxxxxxx"
-HEADERS='-H "Content-Type: application/json" -H "X-Device-ID: '"$DEVICE"'"'
+# Pseudo disponible (3-20 chars, alphanumérique + _ -)
+GET /api/auth/check-pseudo?q=Zidane99
+# Attendu : { available: true }
 
-# Cas 1 : nationId manquant
-curl -s -X POST $BASE_URL $HEADERS -d '{"mode":"buy","quantity":1}'
-# Attendu : HTTP 400, { "error": "Paramètres invalides" }
+# Pseudo déjà pris (case-insensitive)
+GET /api/auth/check-pseudo?q=zidane99
+# Attendu : { available: false, suggestion: "zidane99XX" }
 
-# Cas 2 : quantity = 0
-curl -s -X POST $BASE_URL $HEADERS -d '{"nationId":"BRA","mode":"buy","quantity":0}'
-# Attendu : HTTP 400, { "error": "Paramètres invalides" }
+# Trop court
+GET /api/auth/check-pseudo?q=ab
+# Attendu : { available: false, error: "invalid_format" }
 
-# Cas 3 : quantity négative
-curl -s -X POST $BASE_URL $HEADERS -d '{"nationId":"BRA","mode":"buy","quantity":-5}'
-# Attendu : HTTP 400, { "error": "Paramètres invalides" }
+# Commence par _
+GET /api/auth/check-pseudo?q=_admin
+# Attendu : { available: false, error: "invalid_format" }
 
-# Cas 4 : mode invalide
-curl -s -X POST $BASE_URL $HEADERS -d '{"nationId":"BRA","mode":"short","quantity":1}'
-# Attendu : HTTP 400, { "error": "Mode invalide: buy ou sell" }
+# Caractère interdit (espace)
+GET /api/auth/check-pseudo?q=Zi%20dane
+# Attendu : { available: false, error: "invalid_format" }
 
-# Cas 5 : nationId inexistant dans la base
-curl -s -X POST $BASE_URL $HEADERS -d '{"nationId":"XXX","mode":"buy","quantity":1}'
-# Attendu : HTTP 422, { "error": "Nation introuvable" }
-
-# Cas 6 : quantity décimale (doit être tronquée à l'entier)
-curl -s -X POST $BASE_URL $HEADERS -d '{"nationId":"BRA","mode":"buy","quantity":2.9}'
-# Attendu : traité comme quantity=2 (Math.floor dans la route)
+# Mot réservé
+GET /api/auth/check-pseudo?q=admin
+# Attendu : { available: false, suggestion: "adminXX" }
 ```
+
+**Règle de validation dans le code (`isValidFormat`) :**
+- Longueur : 3 à 20 caractères
+- Regex : `^[a-zA-Z0-9_-]+$`
+- Ne commence pas et ne termine pas par `_` ou `-`
 
 ---
 
-#### 2.3.5 SEC-TRADE-05 — Validation côté serveur : règle métier "plafond 40%"
+#### AUTH-GUEST-02 — `POST /api/auth/guest` — rate limiting
 
-**Objectif :** Pendant la phase de groupes (jours 0 à 22, `v_is_cap = TRUE`), un joueur ne peut pas détenir plus de 40% de la valeur totale de son portfolio dans une seule nation.
+**Objectif :** Pas plus de 5 créations de pseudo depuis la même IP en 10 minutes.
 
 **Procédure :**
-
+```bash
+# Envoyer 6 requêtes depuis la même IP avec des pseudos valides distincts
+for i in $(seq 1 6); do
+  curl -s -X POST https://kickstock.app/api/auth/guest \
+    -H "Content-Type: application/json" \
+    -d "{\"pseudo\": \"TestUser$i\", \"deviceId\": \"$(uuidgen | tr 'A-F' 'a-f')\"}"
+done
 ```
-Portfolio de test :
-- cash = 10 000 KC
-- 0 position ouverte
-- BRA = 200 KC/action
-- Valeur totale = 10 000 KC (100% cash)
+**Résultat attendu :** Les 5 premières requêtes retournent `{ ok: true }` ou des erreurs métier. La 6ème retourne HTTP 429 `{ error: "too_many_requests" }`.
 
-Achat limite : 40% de 10 000 = 4 000 KC → 20 actions BRA max
-```
+> **Note :** Le rate limiter est en mémoire (`lib/rateLimit.ts`), par instance Vercel. Il se réinitialise au démarrage de l'instance — comportement acceptable pour une protection de base contre les botnets.
+
+---
+
+#### AUTH-GUEST-03 — `POST /api/auth/guest` — validation UUID v4 du `deviceId`
 
 ```bash
-# Achat de 20 actions BRA (40% exact — doit passer)
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":20}'
-# Attendu : ok: true, new_cash: 6000
+# deviceId non UUID
+curl -s -X POST https://kickstock.app/api/auth/guest \
+  -H "Content-Type: application/json" \
+  -d '{"pseudo":"TestUser","deviceId":"not-a-uuid"}'
+# Attendu : HTTP 400, { "error": "invalid_device_id" }
 
-# Achat d'1 action supplémentaire (dépasse 40% — doit échouer)
-curl -s -X POST https://kickstock.app/api/trade \
-  -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
-  -d '{"nationId":"BRA","mode":"buy","quantity":1}'
-# Attendu : HTTP 422, { "error": "⛔ Plafond 40% atteint" }
+# UUID v1 (non v4)
+curl -s -X POST https://kickstock.app/api/auth/guest \
+  -H "Content-Type: application/json" \
+  -d '{"pseudo":"TestUser","deviceId":"6ba7b810-9dad-11d1-80b4-00c04fd430c8"}'
+# Attendu : HTTP 400, { "error": "invalid_device_id" }
 ```
 
-**Vérification complémentaire :** Passer au jour 23 (phase KO) et vérifier que le même achat est accepté (la règle de plafonnement ne s'applique plus, `v_is_cap = FALSE`).
+**Regex de référence :** `/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i`
 
 ---
 
-#### 2.3.6 SEC-TRADE-06 — Validation côté serveur : achat d'une nation éliminée
+#### AUTH-GUEST-04 — `POST /api/auth/guest` — Cloudflare Turnstile
 
-**Objectif :** Tenter d'acheter une nation présente dans `game_state.eliminated` doit être refusé.
+**Objectif :** Si `TURNSTILE_SECRET_KEY` est défini, le champ `cfToken` est obligatoire et vérifié.
 
-**Procédure :**
+```bash
+# Token manquant alors que Turnstile est activé
+curl -s -X POST https://kickstock.app/api/auth/guest \
+  -H "Content-Type: application/json" \
+  -d '{"pseudo":"TestUser","deviceId":"<valid-uuid-v4>"}'
+# Attendu (si Turnstile activé) : HTTP 400, { "error": "missing_captcha" }
 
-```sql
--- En base de données (test env) : marquer HAI comme éliminée
-UPDATE game_state SET eliminated = array_append(eliminated, 'HAI') WHERE id = 1;
+# Token invalide
+curl -s -X POST https://kickstock.app/api/auth/guest \
+  -H "Content-Type: application/json" \
+  -d '{"pseudo":"TestUser","deviceId":"<valid-uuid-v4>","cfToken":"fake-token"}'
+# Attendu : HTTP 403, { "error": "captcha_failed" }
 ```
 
+**Bypass pour les tests automatisés :** Ne pas définir `TURNSTILE_SECRET_KEY` dans l'environnement de test — le bloc Turnstile est ignoré si la clé est absente.
+
+---
+
+#### AUTH-GUEST-05 — Namespace de pseudo partagé invité/authentifié
+
+**Objectif :** Un pseudo pris par un invité (`portfolios.guest_username`) ne peut pas être repris par un utilisateur authentifié (`profiles.username`), et vice-versa.
+
+**Procédure :**
+1. Créer un invité avec pseudo `TigerWoods`.
+2. Créer un compte authentifié et appeler `POST /api/auth/set-username` avec `username: 'TigerWoods'`.
+
+**Résultat attendu :** `POST /api/auth/set-username` retourne HTTP 409 `{ error: 'taken' }`.
+
+**Vérification inverse :**
+1. Utilisateur authentifié avec `username = 'TigerWoods'` en base.
+2. Tenter `GET /api/auth/check-pseudo?q=tigerwoods`.
+
+**Résultat attendu :** `{ available: false, suggestion: "tigerwoodsXX" }` (vérification case-insensitive).
+
+---
+
+#### AUTH-GUEST-06 — `GET /api/auth/check-email`
+
+```bash
+# Email enregistré et confirmé
+GET /api/auth/check-email?q=known@user.com
+# Attendu : { exists: true, confirmed: true }
+
+# Email enregistré mais non confirmé
+GET /api/auth/check-email?q=unconfirmed@user.com
+# Attendu : { exists: true, confirmed: false }
+
+# Email inexistant
+GET /api/auth/check-email?q=ghost@user.com
+# Attendu : { exists: false, confirmed: false }
+
+# Format invalide
+GET /api/auth/check-email?q=notanemail
+# Attendu : HTTP 400, { error: "invalid_email" }
+```
+
+---
+
+### 2.5 OAuth et migration invité → compte
+
+#### AUTH-OAUTH-01 — Flux OAuth Google nominal
+
+**Procédure :**
+1. Depuis le `GuestModal`, cliquer sur "Continuer avec Google".
+2. Observer que `saveOAuthPending()` a été appelé (pseudo sauvegardé dans `localStorage` sous `kickstock_oauth_pending`).
+3. Vérifier que le cookie `ks_pending_device` est posé (`SameSite=Lax`, `max-age=600`).
+4. Après le retour OAuth, observer l'URL : `/?ks_migrated=1&ks_new_user=1&ks_pseudo=MonPseudo`.
+
+**Résultat attendu :**
+- Le RPC `migrate_guest_to_user` est appelé avec `p_device_id` (du cookie) et `p_user_id` (du JWT).
+- Le portfolio anonyme est migré vers le compte authentifié.
+- L'URL contient `ks_migrated=1` si la migration a réussi.
+- Le cookie `ks_pending_device` est supprimé (`maxAge: 0`) après le callback.
+
+---
+
+#### AUTH-OAUTH-02 — Détection de première inscription (`isNewUser`)
+
+**Logique dans `/auth/callback/route.ts` :**
+```typescript
+const isNewUser = Date.now() - new Date(session.user.created_at).getTime() < 2 * 60 * 1000;
+```
+
+**Procédure :** Créer un compte Google et vérifier que `ks_new_user=1` est dans l'URL de redirection.
+
+**Résultat attendu :** `ks_new_user=1` présent si le compte a moins de 2 minutes.
+
+---
+
+#### AUTH-OAUTH-03 — Erreur OAuth — redirection propre
+
+```bash
+# Simuler une erreur OAuth (paramètre error dans l'URL de callback)
+GET /auth/callback?error=access_denied
+# Attendu : redirection vers /?ks_auth_error=1
+```
+
+---
+
+### 2.6 Sécurisation de l'API de Trade
+
+#### SEC-TRADE-01 — Protection de `/api/game/advance` (CRITIQUE-1)
+
+> ⚠️ **Vulnérabilité non corrigée.** La route actuelle n'a aucune protection d'authentification ni de secret. Ce test documente le comportement actuel et **doit passer de `[!]` à `[x]`** une fois le correctif appliqué.
+
+**Comportement actuel à documenter :**
+```bash
+# N'importe quel client anonyme peut avancer le jeu
+curl -s -X POST https://kickstock.app/api/game/advance \
+  -H "Content-Type: application/json" \
+  -H "X-Device-ID: $(uuidgen | tr 'A-F' 'a-f')" \
+  -d '{"dayIndex": 0}'
+# Résultat actuel : HTTP 200, le jeu avance
+# Résultat attendu après correctif : HTTP 401
+```
+
+**Correctif recommandé :** Ajouter la vérification du header `X-Advance-Secret` comparé à `process.env.ADVANCE_SECRET`, OU restreindre l'accès aux utilisateurs avec un rôle `admin`.
+
+---
+
+#### SEC-TRADE-02 — Validation UUID v4 dans `/api/trade` (HAUTE-1)
+
+> ⚠️ **UUID v4 non validé dans `/api/trade`.** La validation est présente dans `/api/game/state` et `/api/auth/guest` mais pas dans `/api/trade`.
+
+**Test de l'état actuel :**
+```bash
+# Injection dans le device_id — DOIT être rejeté (mais ne l'est pas actuellement)
+curl -s -X POST https://kickstock.app/api/trade \
+  -H "Content-Type: application/json" \
+  -H "X-Device-ID: '; DROP TABLE portfolios;--" \
+  -d '{"nationId":"BRA","mode":"buy","quantity":1}'
+# Résultat actuel : passe jusqu'au RPC Supabase (protégé par prepared statements)
+# Résultat attendu après correctif : HTTP 400, { code: "INVALID_DEVICE_ID" }
+```
+
+**Note :** Le RPC `execute_trade` est un appel Supabase paramétré — il n'est pas vulnérable à l'injection SQL directe. Mais un `device_id` arbitraire pourrait correspondre à celui d'un autre joueur si la valeur est devinée.
+
+---
+
+#### SEC-TRADE-03 — Codes d'erreur structurés dans `/api/trade`
+
+**Objectif :** Toutes les réponses d'erreur de la route `/api/trade` incluent un champ `code` machine-readable.
+
+**Cas à tester :**
+
+| Scénario | HTTP | `code` attendu | `error` attendu |
+|----------|------|---------------|-----------------|
+| `nationId` manquant | 400 | `INVALID_PARAMS` | `'nationId manquant'` |
+| `mode = 'short'` | 400 | `INVALID_MODE` | `'mode doit être buy ou sell'` |
+| `quantity = 0` | 400 | `INVALID_QUANTITY` | `'quantité invalide'` |
+| `quantity = -5` | 400 | `INVALID_QUANTITY` | `'quantité invalide'` |
+| `quantity = 2.9` (décimal) | 400 | `INVALID_QUANTITY` | `'quantité invalide'` |
+| `X-Device-ID` absent | 400 | `MISSING_DEVICE_ID` | `'X-Device-ID requis'` |
+| Fonds insuffisants (RPC) | 422 | `INSUFFICIENT_FUNDS` | Message du RPC |
+| Nation éliminée (RPC) | 422 | `NATION_ELIMINATED` | `'Nation éliminée 💀'` |
+| Nation inexistante (RPC) | 422 | `NOT_FOUND` | Message du RPC |
+| Erreur interne (500) | 500 | `INTERNAL_ERROR` | `'Erreur interne'` |
+
+> **Changement depuis v1.0 :** `quantity = 2.9` est maintenant **rejeté au niveau de la route** (`!Number.isInteger(quantity)` → HTTP 400) et non plus tronqué (`Math.floor`). Le `Math.floor` subsiste uniquement comme garde-fou avant le RPC, mais la validation amont empêche les décimaux d'y arriver.
+
+---
+
+#### SEC-TRADE-04 — Anti double-dépense (atomicité RPC `execute_trade`)
+
+**Objectif :** Deux trades simultanés sur le même portfolio ne peuvent pas débiter le cash deux fois.
+
+**Procédure :**
+```bash
+DEVICE="<valid-uuid-v4>"
+# Portfolio : cash = 500 KC, BRA = 200 KC/action — chaque achat = 400 KC
+
+curl -s -X POST https://kickstock.app/api/trade \
+  -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
+  -d '{"nationId":"BRA","mode":"buy","quantity":2}' &
+
+curl -s -X POST https://kickstock.app/api/trade \
+  -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
+  -d '{"nationId":"BRA","mode":"buy","quantity":2}' &
+wait
+```
+
+**Résultat attendu :** Une requête réussit (`new_cash: 100`). L'autre retourne HTTP 422 `{ code: "INSUFFICIENT_FUNDS" }`. Le cash final est exactement `100 KC`, jamais négatif.
+
+**Mécanisme :** `FOR UPDATE` sur `portfolios` et `holdings` dans le RPC sérialise les accès concurrents.
+
+---
+
+#### SEC-TRADE-05 — Stratégie d'authentification dans `/api/trade`
+
+**Objectif :** Un utilisateur connecté utilise le client Supabase sessionné (JWT) — `auth.uid()` est défini à l'intérieur du RPC. Un utilisateur anonyme utilise le client admin.
+
+**Procédure :**
+1. Faire un trade avec un utilisateur connecté → vérifier que `user_id` dans la table `transactions` correspond au `auth.uid()`.
+2. Faire un trade en mode anonyme → vérifier que `user_id` est `null` dans `transactions` (ou absent) et que `portfolio.device_id` est renseigné.
+
+---
+
+#### SEC-TRADE-06 — Règle métier : achat d'une nation éliminée
+
+**Procédure :**
+```sql
+-- Marquer HAI comme éliminée (env. de test)
+UPDATE game_state SET eliminated = array_append(eliminated, 'HAI') WHERE id = 1;
+```
 ```bash
 curl -s -X POST https://kickstock.app/api/trade \
   -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
   -d '{"nationId":"HAI","mode":"buy","quantity":5}'
-# Attendu : HTTP 422, { "error": "Nation éliminée 💀" }
+# Attendu : HTTP 422, { code: "NATION_ELIMINATED", error: "Nation éliminée 💀" }
 ```
 
-**Vérification complémentaire — vente d'une nation éliminée (autorisée sans frais) :**
-
+**Vente d'une nation éliminée — sans frais :**
 ```bash
-# Supposons que le joueur détient 10 actions HAI avant l'élimination
 curl -s -X POST https://kickstock.app/api/trade \
   -H "X-Device-ID: $DEVICE" -H "Content-Type: application/json" \
-  -d '{"nationId":"HAI","mode":"sell","quantity":10}'
-# Attendu : ok: true, fee: 0 (pas de frais sur vente de nation éliminée)
+  -d '{"nationId":"HAI","mode":"sell","quantity":5}'
+# Attendu : HTTP 200, { ok: true, fee: 0 }
+# Logique : calcTax(amount, price=1, isKO) = 0 car price <= 1
 ```
 
 ---
 
-#### 2.3.7 SEC-TRADE-07 — Frais de transaction selon la phase
+#### SEC-TRADE-07 — Frais de transaction (`calcTax`) — validation des taux
 
-**Objectif :** Les frais de vente sont de 5% pendant la phase de groupes (jours 0–22) et 10% en phase KO (jours 23+).
+> **Correction de la v1.0 :** Les taux étaient inversés dans la v1.0 du test plan. Le taux correct est :
+> - Phase **groupes** (`isKO = false`) : **10%**, minimum 10 KC
+> - Phase **KO** (`isKO = true`) : **5%**, minimum 10 KC
+> - Nation éliminée (price ≤ 1) : **0%**
 
-**Procédure :**
+**Scénarios de validation :**
 
-```
-Scénario : vente de 10 actions BRA à 200 KC/action = 2 000 KC brut
-
-Phase groupes (jour ≤ 22) :
-- Frais = 2 000 × 0.05 = 100 KC
-- Net reçu = 1 900 KC
-
-Phase KO (jour ≥ 23) :
-- Frais = 2 000 × 0.10 = 200 KC
-- Net reçu = 1 800 KC
-```
-
-**Vérification SQL post-trade :**
-
-```sql
-SELECT fee, total FROM transactions
-WHERE portfolio_id = '<PORTFOLIO_ID>'
-ORDER BY created_at DESC LIMIT 1;
-```
+| Phase | Quantité | Prix | Brut | Taux | Fee attendu | Net attendu |
+|-------|----------|------|------|------|-------------|-------------|
+| Groupes (jour ≤ 16) | 10 | 200 | 2 000 | 10% | 200 KC | 1 800 KC |
+| Groupes — min 10 KC | 1 | 50 | 50 | 10% mais min | 10 KC | 40 KC |
+| KO (jour ≥ 17) | 10 | 200 | 2 000 | 5% | 100 KC | 1 900 KC |
+| KO — min 10 KC | 1 | 100 | 100 | 5% mais min | 10 KC | 90 KC |
+| Éliminée (price=1) | 5 | 1 | 5 | 0% | 0 KC | 5 KC |
 
 ---
 
-#### 2.3.8 SEC-TRADE-08 — Généricité des messages d'erreur 500
+#### SEC-TRADE-08 — Plafond 40% (phase groupes, jours 0–22)
 
-**Objectif :** Aucun message d'erreur interne (nom de table, contrainte PostgreSQL, stack trace) ne doit être retourné au client en HTTP 500.
+**Logique dans le RPC :** `v_is_cap = (current_day_index <= 22)`. Si actif, `((v_held + p_quantity) * v_price) / v_tot_val > 0.40` → rejet.
 
-**Procédure :** Provoquer délibérément une erreur interne en passant un `dayIndex` négatif à `/api/game/advance` ou en corrompant le payload JSON.
+```
+Portfolio : cash = 10 000 KC, 0 position, BRA = 200 KC
+40% de 10 000 = 4 000 KC → max 20 actions BRA
+
+Achat de 20 BRA (4 000 KC = exactement 40%) → OK
+Achat d'1 BRA supplémentaire (dépasse 40%) → HTTP 422, error: "⛔ Plafond 40% atteint"
+```
+
+**Note :** Le plafond 40% est implémenté uniquement dans le RPC `execute_trade` (mode online). En mode offline (`localGameStore`), cette règle n'est **pas** appliquée côté client — c'est un **écart de parité** à documenter et potentiellement corriger.
+
+---
+
+#### SEC-TRADE-09 — Généricité des messages d'erreur 500
+
+**Objectif :** Aucun détail interne ne doit fuiter dans les erreurs 500.
 
 ```bash
+# Payload JSON malformé
 curl -s -X POST https://kickstock.app/api/game/advance \
   -H "Content-Type: application/json" \
-  -H "X-Advance-Secret: $ADVANCE_SECRET" \
-  -d 'payload_json_invalide{'
-# Attendu : HTTP 500, { "error": "Internal server error" }
-# NON attendu : { "error": "SyntaxError: Unexpected token p in JSON at position 0" }
+  -d 'json_invalide{'
+# Attendu : HTTP 500, { error: "Internal server error" }
+# Résultat actuel (corrigé) : générique ✅
 ```
+
+**Vérification Sentry :** Les erreurs 500 doivent apparaître dans le dashboard Sentry (`Sentry.captureException` est appelé dans chaque route). Vérifier qu'une erreur intentionnelle génère bien un événement Sentry.
+
+---
+
+#### SEC-TRADE-10 — ETag et cache conditionnel sur `/api/game/state`
+
+**Objectif :** La route retourne `ETag: "d{dayIndex}-p{portfolioId}"` et honore `If-None-Match`.
+
+```bash
+# Première requête
+curl -v https://kickstock.app/api/game/state \
+  -H "X-Device-ID: $DEVICE"
+# Attendu : HTTP 200 avec header ETag: "d5-p<uuid>"
+
+# Deuxième requête avec l'ETag reçu
+curl -v https://kickstock.app/api/game/state \
+  -H "X-Device-ID: $DEVICE" \
+  -H "If-None-Match: \"d5-p<uuid>\""
+# Attendu : HTTP 304 (pas de body) — état non modifié
+```
+
+**Vérification côté client :** `lib/api.ts` intercepte les 304 en levant `new Error('NOT_MODIFIED')` — le store Zustand doit conserver son état sans écraser les données.
 
 ---
 
 ## 3. TESTS FONCTIONNELS MÉTIER
 
-> **Format des cas de test :** Chaque cas est présenté avec ses champs ID · Titre · Pré-requis · Étapes · Résultat attendu.
+> **Mode de jeu actuel :** Le mode offline (`localGameStore`) est actif par défaut. Dans ce mode, les trades et la simulation s'exécutent **entièrement côté client** via `@kickstock/game-engine`. L'API `/api/trade` et `/api/game/advance` **ne sont pas appelées** pour les actions du joueur. Les tests des sections 3.2 et 3.3 marqués `[OFFLINE]` s'appliquent au store local ; ceux marqués `[ONLINE]` s'appliquent à la route API correspondante.
 
 ---
 
-### 3.1 Flux d'inscription, connexion et attribution du capital initial
+### 3.1 Inscription, connexion et initialisation
 
 ---
 
 **ID :** FT-AUTH-01  
-**Titre :** Inscription d'un nouvel utilisateur avec username — attribution du capital initial  
-**Pré-requis :** Environnement Supabase fonctionnel, trigger `on_auth_user_created` actif  
+**Titre :** Première ouverture — affichage du `GuestModal`  
+**Pré-requis :** Navigateur sans `localStorage.kickstock_pseudo` et sans session Supabase active  
 **Étapes :**
-1. Naviguer vers l'application et cliquer sur "Connexion" / `AuthWidget`.
-2. Choisir l'inscription avec email/mot de passe.
-3. Renseigner `email = newplayer@test.com`, `password = Test1234!`, `username = NoviceTrader`.
-4. Valider le formulaire.
-5. Observer le comportement de l'interface immédiatement après.
+1. Ouvrir l'application sur un navigateur vierge.
 
 **Résultat attendu :**
-- L'`AuthWidget` affiche l'avatar ou le username `NoviceTrader`.
-- Le header mobile affiche `10 000 KC` dans la zone cash.
-- En base : `profiles` contient 1 ligne avec `username = 'NoviceTrader'`, `tut_seen = false`.
-- En base : `portfolios` contient 1 ligne avec `user_id = UID_nouveau`, `cash = 10000.00`, `tx_log = []`.
-- Aucun doublon créé (contrainte `ON CONFLICT DO NOTHING` dans le trigger).
+- `GuestModal` s'affiche (condition : `!getPseudo() && !user`).
+- Sur un device non tactile, le champ pseudo est auto-focusé après 100ms.
+- Le widget Cloudflare Turnstile invisible se charge si `NEXT_PUBLIC_TURNSTILE_SITE_KEY` est défini.
 
 ---
 
 **ID :** FT-AUTH-02  
-**Titre :** Connexion d'un utilisateur existant — récupération du portfolio persisté  
-**Pré-requis :** Utilisateur `returningplayer@test.com` existant avec cash = 7 543.50 KC et 5 positions ouvertes  
+**Titre :** Création de pseudo invité — flux nominal  
+**Pré-requis :** Pseudo `NoviceTrader` non pris  
 **Étapes :**
-1. Se connecter avec `returningplayer@test.com`.
-2. Observer le header et le tab Portfolio (mobile) ou la sidebar Portfolio (browser).
+1. Saisir `NoviceTrader` dans le champ.
+2. Quitter le champ (blur) → l'indicateur de disponibilité s'affiche.
+3. Cliquer sur "JOUER MAINTENANT".
 
 **Résultat attendu :**
-- Cash affiché = `7 543.50 KC` (valeur persistée, pas réinitialisée).
-- Les 5 positions apparaissent dans le portfolio avec leurs quantités correctes.
-- Le `tx_log` du portfolio est intact — l'historique des transactions est visible.
+- `GET /api/auth/check-pseudo?q=NoviceTrader` retourne `{ available: true }`.
+- `POST /api/auth/guest` avec `{ pseudo: 'NoviceTrader', deviceId: '<uuid-v4>', cfToken: '...' }` retourne `{ ok: true }`.
+- `localStorage.kickstock_pseudo = 'NoviceTrader'` est posé.
+- L'événement `kickstock:pseudo-saved` est dispatché.
+- Le store est réinitialisé (`resetGame()`) : cash = 10 000 KC, portfolio vide.
+- Le `GuestModal` se ferme.
+- Si c'est la première fois (`!localStorage.kickstock_seen_tutorial`), l'événement `kickstock:show-tutorial` est dispatché.
+- En base Supabase : `portfolios.guest_username = 'NoviceTrader'` pour ce `device_id`.
 
 ---
 
 **ID :** FT-AUTH-03  
-**Titre :** Fusion portfolio anonyme → portfolio authentifié  
-**Pré-requis :** Un joueur a utilisé l'application en mode anonyme (device_id stocké en localStorage) avec cash = 8 000 KC et 3 positions ouvertes. Il n'a jamais créé de compte.  
+**Titre :** Pseudo déjà pris — suggestion automatique  
+**Pré-requis :** `Zidane99` déjà en base  
 **Étapes :**
-1. Depuis la session anonyme existante, cliquer sur "Connexion".
-2. Créer un nouveau compte.
-3. Observer le portfolio post-connexion.
+1. Saisir `Zidane99` et quitter le champ.
 
 **Résultat attendu :**
-- Le RPC `get_or_create_portfolio` trouve d'abord le portfolio via `device_id`, puis met à jour `user_id` si `user_id IS NULL`.
-- Le cash (8 000 KC) et les positions sont préservés — le portfolio anonyme devient le portfolio authentifié.
-- Le `device_id` reste associé au portfolio pour les sessions future sans connexion.
+- Indicateur rouge "Pseudo déjà utilisé."
+- Bouton "Utiliser « ZidaneXX »" avec une suggestion générée.
+- Cliquer sur la suggestion met à jour le champ et relance la vérification.
 
 ---
 
 **ID :** FT-AUTH-04  
-**Titre :** Username dupliqué — erreur explicite à l'inscription  
-**Pré-requis :** L'utilisateur `TestUser` existe déjà dans `profiles`  
+**Titre :** Connexion OAuth Google — migration du portfolio invité  
+**Pré-requis :** Joueur invité avec `device_id = UUID_G`, cash = 7 500 KC, 3 positions ouvertes, `guest_username = 'TigerFan'`  
 **Étapes :**
-1. Tenter de s'inscrire avec le même `username = 'TestUser'`.
+1. Depuis le `GuestModal`, cliquer sur "Continuer avec Google".
+2. Compléter l'authentification Google.
 
 **Résultat attendu :**
-- L'inscription échoue avec un message d'erreur compréhensible pour l'utilisateur (ex : "Ce pseudonyme est déjà pris").
-- La contrainte `UNIQUE` sur `profiles.username` empêche l'insertion. L'interface ne doit pas afficher `duplicate key value violates unique constraint "profiles_username_key"`.
+- Cookie `ks_pending_device = UUID_G` posé avant la redirection.
+- `/auth/callback` appelle `migrate_guest_to_user(p_device_id=UUID_G, p_user_id=UID_NEW)`.
+- RPC retourne `{ status: 'migrated', guest_username: 'TigerFan' }`.
+- URL de redirection : `/?ks_migrated=1&ks_new_user=1&ks_pseudo=TigerFan`.
+- Le portfolio migré conserve cash = 7 500 KC et les 3 positions.
 
 ---
 
-### 3.2 Flux de placement d'un Trade (Achat / Vente)
-
----
-
-**ID :** FT-TRADE-01  
-**Titre :** Achat d'actions d'une nation active — flux nominal complet  
-**Pré-requis :** Joueur connecté, cash = 10 000 KC, aucune position, journée en cours = Jour 3 (phase groupes), BRA = 200 KC/action  
+**ID :** FT-AUTH-05  
+**Titre :** `syncFromServer` — synchronisation cross-device à la connexion  
+**Pré-requis :** Utilisateur connecté, état sauvegardé en base (`user_game_states`) au Jour 5, device local au Jour 3  
 **Étapes :**
-1. Naviguer vers l'onglet Market (mobile) ou la vue Market (browser).
-2. Cliquer sur la NationCard de Brazil (🇧🇷 BRA).
-3. Dans le `TradeModal`, saisir la quantité `10`.
-4. Cliquer sur "Acheter".
-5. Attendre la confirmation.
+1. Se connecter sur un nouvel appareil où `localGameStore` est au Jour 3.
 
 **Résultat attendu :**
-- HTTP 200 de `/api/trade` avec `ok: true`, `new_cash: 8000`, `new_held: 10`, `price: 200`, `fee: 0`.
-- Le header met à jour le cash à `8 000 KC` sans reload de page.
-- L'onglet Portfolio affiche une nouvelle ligne "BRA · 10 actions · Prix moyen : 200 KC".
-- En base : `holdings` contient `portfolio_id=X, nation_id='BRA', quantity=10`.
-- En base : `transactions` contient 1 ligne avec `type='buy', quantity=10, price=200, fee=0, total=2000`.
-- En base : `portfolios.tx_log[0]` contient `{ dir:'buy', flag:'🇧🇷', name:'Brazil', qty:10, price:200 }`.
+- `syncFromServer()` lit `user_game_states` pour cet utilisateur.
+- `serverDay (5) >= localDay (3)` → l'état serveur remplace l'état local.
+- Le store affiche Jour 5 avec le portfolio du serveur.
+
+**Cas inverse :** State local au Jour 7, serveur au Jour 5 → l'état local est poussé vers le serveur.
 
 ---
 
-**ID :** FT-TRADE-02  
-**Titre :** Vente partielle d'une position — calcul des frais  
-**Pré-requis :** Joueur avec 20 actions BRA à prix moyen 180 KC, cash = 5 000 KC, journée en cours = Jour 5 (phase groupes, `v_is_cap = TRUE`), BRA prix courant = 200 KC  
+**ID :** FT-AUTH-06  
+**Titre :** `syncBestScore` — mise à jour atomique du meilleur score  
+**Pré-requis :** `portfolios.best_score = 12 000 KC` en base, joueur atteint 15 000 KC de valeur totale après un advance  
+**Résultat attendu :**
+- `syncBestScore(15000)` est appelé (fire-and-forget).
+- Requête Supabase : `UPDATE portfolios SET best_score = 15000 WHERE user_id = UID AND (best_score IS NULL OR best_score < 15000)`.
+- La vue `leaderboard` reflète le nouveau score.
+
+---
+
+### 3.2 Flux de Trade (mode offline — `localGameStore`)
+
+> En mode offline, les trades sont entièrement locaux. Pas d'appel réseau.
+
+---
+
+**ID :** FT-TRADE-01 `[OFFLINE]`  
+**Titre :** Achat nominal — mise à jour immédiate du store  
+**Pré-requis :** `dayIndex = 3` (phase groupes), cash = 10 000 KC, BRA = 200 KC  
 **Étapes :**
-1. Ouvrir le `TradeModal` de BRA.
-2. Saisir la quantité `10` en mode vente.
-3. Confirmer.
+1. Appeler `store.trade('buy', 'BRA', 10)`.
 
 **Résultat attendu :**
-- Frais = 10 × 200 × 5% = 100 KC
-- Net reçu = (10 × 200) − 100 = 1 900 KC
-- `new_cash = 5 000 + 1 900 = 6 900 KC`
-- `new_held = 20 − 10 = 10 actions`
-- P&L affiché : (200 − 180) × 10 = +200 KC sur la position clôturée
+- Retourne `null` (pas d'erreur).
+- `store.cash = 10 000 − (200 × 10) = 8 000 KC` (arrondi à 1 décimale via `Math.round(x * 10) / 10`).
+- `store.portfolio['BRA'] = 10`.
+- `store.avgCost['BRA'] = 200`.
+- `store.txLog[0] = { dir: 'buy', flag: '🇧🇷', name: 'Brazil', qty: 10, price: 200, day: 3 }`.
+- `localStorage['ks-game-state']` contient les nouvelles valeurs (persistance Zustand).
+- Un timer debounce de 5 s est lancé pour sauvegarder sur Supabase si l'utilisateur est connecté.
 
 ---
 
-**ID :** FT-TRADE-03  
-**Titre :** Vente totale d'une position — nettoyage du holding  
-**Pré-requis :** Joueur avec exactement 5 actions GER, GER = 100 KC  
+**ID :** FT-TRADE-02 `[OFFLINE]`  
+**Titre :** Vente partielle — calcul de la taxe en phase groupes (10%, min 10 KC)  
+**Pré-requis :** `dayIndex = 5`, 20 actions BRA à prix moyen 180 KC, prix courant BRA = 200 KC, cash = 5 000 KC  
 **Étapes :**
-1. Vendre les 5 actions GER au prix courant.
+1. Appeler `store.trade('sell', 'BRA', 10)`.
 
 **Résultat attendu :**
-- `new_held = 0`
-- En base : la ligne `holdings` avec `nation_id='GER'` est supprimée (`DELETE FROM holdings WHERE id = v_hid`).
-- En base : `avg_cost` JSONB sur le portfolio ne contient plus la clé `"GER"` (`v_avg_cost := v_avg_cost - p_nation_id`).
-- L'onglet Portfolio ne liste plus GER.
+- `calcTax(2000, 200, false)` = `max(2000 × 0.10, 10)` = **200 KC**
+- `net = 2000 − 200 = 1 800 KC`
+- `store.cash = 5 000 + 1 800 = 6 800 KC`
+- `store.portfolio['BRA'] = 10`
 
 ---
 
-**ID :** FT-TRADE-04  
-**Titre :** Affichage du prix courant dans le `TradeModal` — cohérence avec l'état global  
-**Pré-requis :** La simulation vient d'être jouée, les prix ont changé  
+**ID :** FT-TRADE-03 `[OFFLINE]`  
+**Titre :** Vente — taxe en phase KO (5%, min 10 KC)  
+**Pré-requis :** `dayIndex = 20` (phase R32), 10 actions GER, prix = 100 KC  
 **Étapes :**
-1. Ouvrir le `TradeModal` de ESP.
-2. Observer le prix affiché.
-3. Comparer avec `nations.current_price` en base.
+1. Appeler `store.trade('sell', 'GER', 10)`.
 
 **Résultat attendu :**
-- Le prix dans le modal est identique à `nations.current_price` pour ESP.
-- Si le prix a changé depuis l'ouverture du modal (polling de 3s), le modal reflète le nouveau prix (ou un indicateur de "prix mis à jour" est visible).
+- `calcTax(1000, 100, true)` = `max(1000 × 0.05, 10)` = **50 KC**
+- `net = 1000 − 50 = 950 KC`
 
 ---
 
-### 3.3 Flux de clôture d'une journée (Simulation)
-
----
-
-**ID :** FT-SIM-01  
-**Titre :** Simulation d'une journée de groupes — mise à jour des prix  
-**Pré-requis :** Journée courante = Jour 1 (MEX vs RSA, KOR vs CZE), `game_state.current_day_index = 0`, `advancing = false`  
+**ID :** FT-TRADE-04 `[OFFLINE]`  
+**Titre :** Vente totale — nettoyage du portfolio et de `avgCost`  
+**Pré-requis :** Exactement 5 actions GER  
 **Étapes :**
-1. Cliquer sur le bouton "⚡ PLAY" (mobile : onglet Simulate, browser : bouton dans la topbar).
-2. Attendre la fin de l'animation de résultats.
+1. Appeler `store.trade('sell', 'GER', 5)`.
 
 **Résultat attendu :**
-- L'API `/api/game/advance` reçoit `{ dayIndex: 0 }`.
-- Le verrou CAS est acquis (`advancing = true`) puis relâché (`advancing = false`).
-- Pour chaque match de la journée, un résultat est simulé et persisté dans `matches` (`score_a`, `score_b`, `winner_id`, `is_upset`).
-- Les prix sont recalculés avec `applyResult` et insérés dans `nation_prices` pour `day_index = 1`.
-- Le trigger `trg_sync_nation_price` met à jour `nations.current_price` pour MEX, RSA, KOR, CZE.
-- `game_state.current_day_index` passe à `1`.
-- L'interface affiche les nouveaux prix (hausse en `--gain` vert, baisse en `--loss` rouge).
+- `store.portfolio` ne contient plus la clé `'GER'`.
+- `store.avgCost` ne contient plus la clé `'GER'`.
 
 ---
 
-**ID :** FT-SIM-02  
-**Titre :** Distribution des dividendes lors du passage en R32 (Jour 18)  
-**Pré-requis :** Journée courante = Jour 17 (dernier jour de groupes), joueur A détient 10 actions BRA (prix courant = 250 KC après les groupes), BRA qualifiée pour R32  
+**ID :** FT-TRADE-05 `[OFFLINE]`  
+**Titre :** Calcul du prix moyen pondéré à l'achat  
+**Pré-requis :** 10 actions BRA à avgCost = 180 KC, nouveau prix BRA = 220 KC  
 **Étapes :**
-1. Jouer la journée 17 via le bouton PLAY.
+1. Acheter 10 actions BRA supplémentaires à 220 KC.
 
 **Résultat attendu :**
-- Le RPC `distribute_dividends` est appelé avec `p_nation_id='BRA'`, `p_round='r32'`, `p_rate=0.10`, `p_price=250`, `p_day_index=18`.
-- Dividende = 10 actions × 250 KC × 10% = 250 KC.
-- `portfolios.cash` du joueur A est augmenté de 250 KC.
-- En base : `dividends` contient 1 ligne `(portfolio_id=A, nation_id='BRA', round='r32', amount=250, shares=10)`.
-- L'interface affiche la notification de dividende reçu (si feature UI implémentée).
+- `newAvg = (10 × 180 + 10 × 220) / 20 = 200 KC`
+- `store.avgCost['BRA'] = 200`
 
 ---
 
-**ID :** FT-SIM-03  
-**Titre :** Recalcul du classement après résultats de groupe  
-**Pré-requis :** Groupe C : BRA (9 pts), MAR (6 pts), SCO (3 pts), HAI (0 pts) après 3 journées  
-**Étapes :**
-1. Observer l'onglet Standings (mobile) ou la vue Standings (browser).
-
-**Résultat attendu :**
-- `buildGroupStandingsUI` retourne le groupe C trié : BRA → MAR → SCO → HAI.
-- Les colonnes MP/W/D/L/GF/GA/Pts affichent les valeurs cohérentes avec les résultats simulés.
-- HAI n'est pas marquée comme éliminée tant que la phase de groupes n'est pas terminée.
-
----
-
-**ID :** FT-SIM-04  
-**Titre :** Appel à `/api/game/advance` avec `dayIndex` déjà passé — idempotence  
-**Pré-requis :** `game_state.current_day_index = 5` (le jeu est déjà au jour 5)  
-**Étapes :**
-1. Envoyer manuellement `POST /api/game/advance` avec `{ dayIndex: 4 }` (un jour déjà joué).
-
-**Résultat attendu :**
-- La route retourne `{ alreadyAdvanced: true, newDayIndex: 5 }` avec HTTP 200.
-- Aucune modification de la base de données ne se produit.
-- Le cash et les positions de tous les joueurs restent inchangés.
-
----
-
-**ID :** FT-SIM-05  
-**Titre :** Concurrence sur `/api/game/advance` — verrou CAS  
-**Pré-requis :** `game_state.advancing = false`, `current_day_index = 10`  
-**Étapes :**
-1. Envoyer deux requêtes `POST /api/game/advance` avec `{ dayIndex: 10 }` en parallèle simultané.
-
-**Résultat attendu :**
-- L'une des requêtes acquiert le verrou (`advancing = true`) et complète la simulation.
-- L'autre requête reçoit HTTP 409 `{ advancing: true, message: "Day already advancing" }`.
-- La journée est simulée exactement une fois — les prix ne sont mis à jour qu'une seule fois.
-
----
-
-### 3.4 Cas limites critiques
+### 3.3 Cas limites de Trade
 
 ---
 
 **ID :** FT-EDGE-01  
-**Titre :** Tentative de trade avec un solde de crédits insuffisant  
-**Pré-requis :** Joueur avec cash = 150 KC, BRA = 200 KC/action  
-**Étapes :**
-1. Tenter d'acheter 1 action BRA (coût = 200 KC > cash disponible).
-
-**Résultat attendu :**
-- HTTP 422 avec `{ "error": "Fonds insuffisants" }`.
-- Le cash du joueur reste à 150 KC — aucune modification en base.
-- L'interface affiche le message d'erreur dans le `TradeModal` sans fermer celui-ci.
+**Titre :** Solde insuffisant  
+**Pré-requis :** Cash = 150 KC, BRA = 200 KC  
+**Résultat attendu :** `store.trade('buy', 'BRA', 1)` retourne `'Fonds insuffisants'`. Cash inchangé.
 
 ---
 
 **ID :** FT-EDGE-02  
-**Titre :** Tentative de vente d'actions non détenues (vente à découvert)  
-**Pré-requis :** Joueur sans aucune position sur MEX  
-**Étapes :**
-1. Tenter de vendre 5 actions MEX.
-
-**Résultat attendu :**
-- HTTP 422 avec `{ "error": "Actions insuffisantes" }`.
-- La route vérifie `v_held < p_quantity` dans le RPC. `v_held = 0 < 5` → rejet.
+**Titre :** Vente à découvert  
+**Pré-requis :** 0 actions MEX  
+**Résultat attendu :** `store.trade('sell', 'MEX', 1)` retourne `'Actions insuffisantes'`.
 
 ---
 
 **ID :** FT-EDGE-03  
-**Titre :** Coupure réseau pendant une transaction — état de la base  
-**Pré-requis :** Joueur avec cash = 5 000 KC, 0 actions BRA  
-**Étapes :**
-1. Initier un achat de 10 actions BRA (2 000 KC).
-2. Simuler une coupure réseau côté client pendant que le serveur traite la requête (via les DevTools → Network → Offline, ou en coupant la connexion 50ms après l'envoi).
-3. Rétablir la connexion.
-4. Observer l'état du portfolio.
-
-**Résultat attendu :**
-- Le RPC `execute_trade` est atomique (ACID). Soit la transaction est complète (cash débité, holding créé), soit elle est annulée.
-- Il ne doit **jamais** exister un état où le cash est débité sans que le holding soit créé, ou vice-versa.
-- La requête côté client retourne soit un `ok: true` soit un timeout sans réponse. Si timeout, l'interface doit permettre de vérifier l'état actuel du portfolio sans relancer le trade automatiquement.
+**Titre :** Achat d'une nation éliminée  
+**Pré-requis :** HAI dans `store.eliminated`  
+**Résultat attendu :** `store.trade('buy', 'HAI', 1)` retourne `'Nation éliminée 💀'`.
 
 ---
 
 **ID :** FT-EDGE-04  
-**Titre :** Parier à la "dernière seconde" — comportement lors du basculement de journée  
-**Pré-requis :** Un joueur tente un trade exactement au moment où `/api/game/advance` s'exécute  
-**Étapes :**
-1. Simuler la concurrence : envoyer simultanément un `POST /api/trade` et un `POST /api/game/advance`.
-
+**Titre :** Vente d'une nation éliminée — sans frais  
+**Pré-requis :** HAI dans `store.eliminated`, 10 actions HAI, prix = 1 KC (liquidé)  
+**Étapes :** `store.trade('sell', 'HAI', 10)`.  
 **Résultat attendu :**
-- Le trade utilise le prix de `nations.current_price` au moment de son exécution (`SELECT current_price FROM nations WHERE id = p_nation_id`).
-- Si le trade arrive *avant* la mise à jour des prix, il est traité au prix de la journée précédente.
-- Si le trade arrive *après*, il est traité au nouveau prix.
-- Il ne peut pas exister de trade exécuté avec un prix incohérent (mi-vieux, mi-nouveau) car `execute_trade` lit le prix au début de sa transaction PostgreSQL.
+- `calcTax(10, 1, anyKO)` = 0 (car `price <= 1`)
+- Cash augmente de 10 KC (10 × 1 KC).
 
 ---
 
 **ID :** FT-EDGE-05  
-**Titre :** Overflow du `tx_log` — troncature à 100 entrées  
-**Pré-requis :** Joueur avec exactement 100 transactions dans son `tx_log`  
-**Étapes :**
-1. Exécuter un 101ème trade.
-
-**Résultat attendu :**
-- `tx_log` reste à 100 entrées (`jsonb_array_length(v_tx_log) <= 100`).
-- L'entrée la plus ancienne (index 100) est supprimée, la plus récente est en position 0.
-- Aucune donnée de transaction n'est perdue dans la table `transactions` (qui elle est illimitée).
+**Titre :** Nation inexistante  
+**Résultat attendu :** `store.trade('buy', 'ZZZ', 1)` retourne `'Nation introuvable'`.
 
 ---
 
 **ID :** FT-EDGE-06  
-**Titre :** Fin de tournoi — nation championne et dividende final  
-**Pré-requis :** Simulation au jour 33 (Finale), joueur détient 5 actions FRA, FRA remporte la finale  
-**Étapes :**
-1. Jouer la journée 33 (la Finale).
-
-**Résultat attendu :**
-- `game_state.champion_id = 'FRA'`.
-- `distribute_dividends` est appelé avec `p_round='champion'`, `p_rate=0.60`.
-- Dividende champion = 5 × prix_FRA × 60%.
-- Le portfolio du joueur reçoit ce dividende en cash.
-- L'interface affiche un overlay ou une animation de célébration.
+**Titre :** Overflow du `txLog` — troncature à 100 entrées  
+**Pré-requis :** `txLog` contient exactement 100 entrées  
+**Étapes :** Effectuer un 101ème trade.  
+**Résultat attendu :** `store.txLog.length === 100`. La 101ème entrée est ajoutée en tête et la plus ancienne (index 100) est supprimée via `.slice(0, 100)`.
 
 ---
 
 **ID :** FT-EDGE-07  
-**Titre :** Plafond 40% — calcul dynamique avec positions existantes  
-**Pré-requis :**
-```
-Portfolio : cash = 2 000 KC
-Holdings : BRA × 20 = 4 000 KC (à 200), GER × 10 = 1 000 KC (à 100)
-Valeur totale = 2 000 + 4 000 + 1 000 = 7 000 KC
-BRA = 57.1% du portfolio → déjà au-dessus du plafond
-```
-**Étapes :**
-1. Tenter d'acheter 1 action GER supplémentaire (100 KC, cash suffisant).
-2. Tenter d'acheter 1 action BRA supplémentaire (200 KC, cash suffisant).
+**Titre :** `resetGame()` — remise à zéro complète  
+**Étapes :** Appeler `store.resetGame()`.  
+**Résultat attendu :**
+- `store.cash = 10 000 KC`
+- `store.portfolio = {}`
+- `store.txLog = []`
+- `store.dayIndex = 0`
+- `store.eliminated = []`
+- `localStorage['ks-game-state']` contient l'état vide persisté.
+
+---
+
+### 3.4 Flux de simulation (Advance Day)
+
+---
+
+**ID :** FT-SIM-01 `[OFFLINE]`  
+**Titre :** Simulation d'une journée de groupes — prix, résultats, historique  
+**Pré-requis :** `dayIndex = 0` (Jour 1 : MEX vs RSA, KOR vs CZE)  
+**Étapes :** Appeler `store.advanceDay()`.
 
 **Résultat attendu :**
-- Achat GER : autorisé (GER passerait à 15.7% < 40%).
-- Achat BRA : refusé `⛔ Plafond 40% atteint` car BRA est déjà à 57.1% et tout achat supplémentaire aggrave la situation.
+- Retourne `{ results: [...], flash: {...} }` avec 2 matchs simulés.
+- `results[0]` contient `{ a: 'MEX', b: 'RSA', scoreA, scoreB, res, pA, pB, newPA, newPB, ... }`.
+- `newPA > pA` ou `newPA < pA` selon le résultat. Prix plancher : `Math.max(1, rawPA)`.
+- `store.dayIndex = 1`.
+- `store.priceHistory['MEX']` contient maintenant 2 entrées.
+- `store.matchResults[0]` contient les résultats du Jour 0.
+- `flash['MEX']` = `'fu'` si prix hausse, `'fd'` si baisse.
+- `bestScore` mis à jour si `(cash + valeur_portfolio) > ancien bestScore`.
+- `syncBestScore` appelé si le bestScore a changé.
+- State sauvegardé immédiatement sur Supabase si l'utilisateur est connecté (pas de debounce — le day advance est un point de sauvegarde majeur).
+
+---
+
+**ID :** FT-SIM-02 `[OFFLINE]`  
+**Titre :** Construction du R32 pool après le Jour 17 (dernier jour de groupes)  
+**Pré-requis :** `dayIndex = 16`, les 17 journées de groupes jouées, standings calculables  
+**Étapes :** Appeler `store.advanceDay()`.
+
+**Résultat attendu :**
+- `buildR32Pool(allResults, eliminated)` est appelé.
+- `store.r32Pool` contient 32 nations qualifiées (les 2 premiers de chaque groupe + 8 meilleurs 3ièmes).
+- Les nations non qualifiées sont ajoutées à `store.eliminated` et leur prix est fixé à 1 KC.
+- `flash[nation_non_qualifiee] = 'fd'` pour chaque nation éliminée lors de ce jour.
+
+---
+
+**ID :** FT-SIM-03 `[OFFLINE]`  
+**Titre :** Distribution des dividendes lors de R32 (Jour 17)  
+**Pré-requis :** `dayIndex = 17` (phase R32, `divKey = 'r32'`), 10 actions BRA, BRA qualifiée, prix BRA = 250 KC  
+**Étapes :** Appeler `store.advanceDay()`.
+
+**Résultat attendu :**
+- BRA gagne son match R32 : `calcDividend(250, 'r32')` = `250 × 0.10 = 25 KC/action`.
+- `10 actions × 25 KC = 250 KC` ajoutés au cash.
+- `results[i].divCash = 250` pour le match de BRA.
+- Si BRA perd : pas de dividende pour ce round.
+
+---
+
+**ID :** FT-SIM-04 `[OFFLINE]`  
+**Titre :** Finale — dividende pour le finaliste perdant + champion  
+**Pré-requis :** `dayIndex = 33` (phase `Final`, `divKey = 'final'`), 5 actions FRA (champion), 3 actions ARG (finaliste perdant)  
+**Étapes :** Appeler `store.advanceDay()`.
+
+**Résultat attendu :**
+- FRA (champion) reçoit : dividende `final` + dividende `champion`
+  - Dividende final : `5 × calcDividend(prix_FRA, 'final')` = `5 × prix_FRA × 0.40`
+  - Champion bonus : `5 × prix_FRA × 0.60`
+- ARG (finaliste) reçoit : dividende `final`
+  - `3 × calcDividend(prix_ARG, 'final')` = `3 × prix_ARG × 0.40`
+- ARG est ajouté à `eliminated`, son prix fixé à 1 KC.
+- `store.champion = 'FRA'`.
+
+---
+
+**ID :** FT-SIM-05 `[OFFLINE]`  
+**Titre :** Liquidation d'une nation éliminée en KO  
+**Pré-requis :** Joueur détient 10 actions RSA, RSA perd son match R32 (`elimId = 'RSA'`), prix RSA = 15 KC au moment de l'élimination  
+**Étapes :** Appeler `store.advanceDay()`.
+
+**Résultat attendu :**
+- `store.eliminated` contient `'RSA'`.
+- `store.prices['RSA'] = 1` (liquidation à 1 KC).
+- `store.cash` est augmenté de `10 × 1 = 10 KC` (liquidation des positions au prix plancher de 1 KC).
+- `store.portfolio` ne contient plus `'RSA'`.
+- `flash['RSA'] = 'fd'`.
+
+---
+
+**ID :** FT-SIM-06 `[OFFLINE]`  
+**Titre :** Match SF — pas d'élimination pour le perdant (`phase !== 'SF'`)  
+**Pré-requis :** `dayIndex = 29` (phase `SF`)  
+**Résultat attendu :**
+- Le perdant d'une demi-finale n'est **pas** ajouté à `eliminated` (`elimId = null` car `day.phase === 'SF'`).
+- Le perdant est ajouté à `store.thirdPool` pour le match de 3ème place.
+
+---
+
+**ID :** FT-SIM-07 `[OFFLINE]`  
+**Titre :** Journée KO vide — auto-skip  
+**Pré-requis :** `dayIndex = X` pointe sur un jour KO dont le pool n'est pas encore rempli (`todayMatches.length === 0`)  
+**Résultat attendu :** `store.dayIndex` est incrémenté de 1. `advanceDay()` retourne `{ results: [], flash: {} }`.
+
+---
+
+**ID :** FT-SIM-08 `[OFFLINE]`  
+**Titre :** Calcul du `bestScore` après advance  
+**Pré-requis :** Cash = 8 000 KC, portfolio = 5 × BRA @ 250 KC = 1 250 KC de valeur. Total = 9 250 KC. `bestScore` actuel = 9 000 KC.  
+**Étapes :** `store.advanceDay()`.  
+**Résultat attendu :** `store.bestScore = 9 250 KC` (nouveau total > ancien bestScore). `syncBestScore(9250)` est appelé.
+
+---
+
+### 3.5 Comportement réseau et persistance
+
+---
+
+**ID :** FT-NET-01  
+**Titre :** Coupure réseau pendant un trade `[OFFLINE]`  
+**Résultat attendu :** Le trade en mode offline est **entièrement synchrone et local** — aucun appel réseau n'est effectué. Une coupure réseau n'a aucun impact sur le trade. Le state Zustand est mis à jour immédiatement.
+
+---
+
+**ID :** FT-NET-02  
+**Titre :** Coupure réseau pendant la sauvegarde debounced  
+**Pré-requis :** Utilisateur connecté. Trade effectué → debounce de 5 s en attente.  
+**Étapes :** Couper le réseau avant que le debounce ne s'écoule.  
+**Résultat attendu :** `writeStateToSupabase` échoue silencieusement (`catch { /* best-effort */ }`). L'état local dans `localStorage` est intact — la prochaine connexion déclenchera une nouvelle tentative de sync.
+
+---
+
+**ID :** FT-NET-03  
+**Titre :** Rechargement de page — persistance `localStorage`  
+**Pré-requis :** Trade effectué, cash = 7 500 KC, 3 positions ouvertes.  
+**Étapes :** Recharger la page (F5).  
+**Résultat attendu :**
+- Zustand `persist` rehydrate depuis `localStorage['ks-game-state']`.
+- Cash = 7 500 KC, portfolio intact, `dayIndex` correct — état identique avant rechargement.
+- `loading = false` immédiatement (pas d'appel API `fetchState` en mode offline).
 
 ---
 
 ## 4. COMPATIBILITÉ UI/UX
 
-### 4.1 Grille de vérification Cross-Platform
+### 4.1 Matrice d'environnements cibles
 
-La grille ci-dessous doit être complétée pour chaque device/navigateur cible avant release.
-
-#### 4.1.1 Matrice de couverture des environnements
-
-| # | Environnement | Résolution | Shell attendu | Statut |
-|---|--------------|------------|---------------|--------|
-| E1 | Chrome 124+ macOS (dev) | 1440 × 900 | BrowserShell | `[ ]` |
+| # | Environnement | Viewport | Shell attendu | Statut |
+|---|--------------|----------|---------------|--------|
+| E1 | Chrome 124+ macOS | 1440 × 900 | BrowserShell | `[ ]` |
 | E2 | Chrome 124+ Windows | 1920 × 1080 | BrowserShell | `[ ]` |
 | E3 | Firefox 125+ macOS | 1440 × 900 | BrowserShell | `[ ]` |
 | E4 | Safari 17+ macOS | 1440 × 900 | BrowserShell | `[ ]` |
 | E5 | Edge 124+ Windows | 1920 × 1080 | BrowserShell | `[ ]` |
-| E6 | Chrome DevTools Mobile (iPhone 14 Pro, 393 × 852) | 393 px | MobileShell | `[ ]` |
-| E7 | Chrome DevTools Mobile (Pixel 7, 412 × 915) | 412 px | MobileShell | `[ ]` |
+| E6 | Chrome DevTools iPhone 14 Pro (393 px) | 393 px | MobileShell | `[ ]` |
+| E7 | Chrome DevTools Pixel 7 (412 px) | 412 px | MobileShell | `[ ]` |
 | E8 | Safari iOS 17 — iPhone réel | < 600 px | MobileShell | `[ ]` |
-| E9 | Chrome Android — Samsung Galaxy S24 | < 600 px | MobileShell | `[ ]` |
-| E10 | iPad Pro 12.9" portrait (1024 × 1366) | 1024 px | BrowserShell | `[ ]` |
-| E11 | iPad mini portrait (768 × 1024) | 768 px | BrowserShell | `[ ]` |
-| E12 | Redimensionnement live : 1200 px → 500 px | Transition | Switch shell | `[ ]` |
+| E9 | Chrome Android — Galaxy S24 | < 600 px | MobileShell | `[ ]` |
+| E10 | iPad Pro 12.9" portrait | 1024 px | BrowserShell | `[ ]` |
+| E11 | iPad mini portrait | 768 px | BrowserShell | `[ ]` |
+| E12 | Resize live 1200 px → 500 px | Transition | Switch shell | `[ ]` |
+
+**Breakpoint de référence :** `MOBILE_BREAKPOINT = 600` dans `@kickstock/constants` — source de vérité unique pour `useLayout()` et les tests.
 
 ---
 
-#### 4.1.2 Checklist de base commune (tous environnements)
+### 4.2 Checklist commune (tous environnements)
 
-Pour chaque environnement de la matrice, valider les points suivants :
+Pour chaque ligne de la matrice :
 
-- `[ ]` Le bon shell est monté (`MobileShell` si `window.innerWidth < 600`, `BrowserShell` sinon)
-- `[ ]` Le ticker défile sans saccade
-- `[ ]` Le cash et la valeur totale s'affichent dans le header
-- `[ ]` Au moins un onglet/vue est accessible et affiche du contenu
-- `[ ]` Un trade de test (achat 1 action) s'exécute correctement
+- `[ ]` Le bon shell est monté selon `window.innerWidth` vs `MOBILE_BREAKPOINT`
 - `[ ]` Aucune erreur dans la console JavaScript (`console.error`, erreurs réseau non gérées)
-- `[ ]` Les variables CSS `--gold`, `--gain`, `--loss` sont appliquées correctement (fond sombre, textes contrastés)
+- `[ ]` Le `GuestModal` s'affiche si aucun pseudo ni session active
+- `[ ]` Le cash (10 000 KC initial) s'affiche dans le header
+- `[ ]` Le ticker défile sans saccade
+- `[ ]` Un trade de test (achat 1 action) s'exécute correctement et met à jour le cash
+- `[ ]` Les variables CSS `--gold`, `--gain`, `--loss` sont correctement appliquées
+- `[ ]` Aucun overflow horizontal sur le body
 
 ---
 
-### 4.2 Tests spécifiques Browser (Desktop)
+### 4.3 `useValidateMechanics` — Contrat des shells
 
-#### 4.2.1 UI-BROWSER-01 — Layout sidebar + main : intégrité à différentes largeurs
+**Objectif :** En mode `development`, chaque shell appelle `useValidateMechanics(contract, shellName)` qui avertit si un des 9 champs de `MechanicsContract` est manquant.
 
-**Objectif :** La sidebar de 72px ne doit jamais rétrécir ni empiéter sur le contenu principal, même à la résolution minimale browser (600px).
+**Champs obligatoires (définis dans `@kickstock/types`) :**
 
-**Procédure :**
+| Champ | Signification |
+|-------|--------------|
+| `canViewNationPrice` | Afficher le prix courant d'une nation |
+| `canBuy` | Initier un achat |
+| `canSell` | Initier une vente |
+| `canViewPortfolio` | Voir ses positions |
+| `canViewCash` | Voir son solde |
+| `canViewPnL` | Voir son P&L non réalisé |
+| `canSimulate` | Déclencher la simulation d'un jour |
+| `canViewStandings` | Voir les classements de groupe |
+| `canViewSchedule` | Voir le calendrier des matchs |
 
-1. Ouvrir le BrowserShell à exactement 600px de largeur (DevTools).
-2. Vérifier visuellement et par inspection CSS.
+**Procédure :** En dev, ouvrir la console sur le MobileShell et le BrowserShell. Aucun warning `[KickStock] ⚠️ Shell "..." is missing required mechanics` ne doit apparaître.
 
+---
+
+### 4.4 Tests spécifiques Browser (Desktop)
+
+#### UI-BROWSER-01 — Sidebar 72px — intégrité au viewport minimal
+
+**Procédure :** Ouvrir le BrowserShell à exactement 600 px.  
 **Résultat attendu :**
 - Sidebar : `width: 72px`, `flex-shrink: 0` — ne rétrécit pas.
-- Zone `ks-main` : `flex: 1`, `min-width: 0` — prend le reste sans overflow horizontal.
-- Aucune scrollbar horizontale n'apparaît sur le body.
+- Zone `ks-main` : `flex: 1`, `min-width: 0` — prend le reste.
+- Aucune scrollbar horizontale.
 
 ---
 
-#### 4.2.2 UI-BROWSER-02 — Vue HOME : layout 2 colonnes (48% / 52%)
+#### UI-BROWSER-02 — Vue HOME : layout 2 colonnes
 
-**Procédure :**
+**Résultat attendu :** Colonne gauche `width: 48%`, colonne droite `flex: 1`. Scroll vertical indépendant de chaque colonne. À 800 px de largeur totale (après sidebar 72 px → 728 px pour le main), les deux colonnes restent lisibles sans troncature.
 
-1. Naviguer vers la vue Home du BrowserShell.
-2. Inspecter la division gauche (planning) et droite (market).
+---
+
+#### UI-BROWSER-03 — Grille Market `auto-fill`
+
+La grille `.mkt-grid` utilise `grid-template-columns: repeat(auto-fill, minmax(200px, 1fr))`.
+
+| Largeur fenêtre | Colonnes attendues |
+|-----------------|--------------------|
+| 1400 px | 5–6 |
+| 900 px | 3–4 |
+| 700 px | 2–3 |
+
+---
+
+#### UI-BROWSER-04 — Hover states sur les tiles
+
+**Résultat attendu :** Transition CSS visible (background, bordure ou élévation). Curseur `pointer`. Pas de saut brutal (transition présente).
+
+---
+
+#### UI-BROWSER-05 — Standings multi-groupes (12 groupes)
 
 **Résultat attendu :**
-- Colonne gauche : `width: 48%`, `border-right: 1px solid var(--border)`.
-- Colonne droite : `flex: 1`, scrollable indépendamment de la colonne gauche.
-- Le contenu d'une colonne ne déborde pas dans l'autre.
-- À 800px de largeur totale (après sidebar 72px → 728px pour le main), les deux colonnes restent lisibles.
+- Grille `.std-grid` : `repeat(auto-fill, minmax(280px, 1fr))`.
+- Chaque groupe affiche MP/W/D/L/GF/GA/Pts correctement alignés pour 4 équipes.
+- À 1440 px : 4–5 groupes par ligne.
 
 ---
 
-#### 4.2.3 UI-BROWSER-03 — Grille de StockTiles — `auto-fill` et responsive grid
-
-**Procédure :**
-
-1. Naviguer vers la vue Market.
-2. Redimensionner la fenêtre de 1400px à 700px tout en observant la grille.
+#### UI-BROWSER-06 — Bouton PLAY topbar — état disabled pendant l'avancement
 
 **Résultat attendu :**
-- La grille `.mkt-grid` utilise `grid-template-columns: repeat(auto-fill, minmax(200px, 1fr))`.
-- À 1400px : 5–6 colonnes.
-- À 900px : 3–4 colonnes.
-- À 700px (après sidebar) : 2 colonnes.
-- Aucune tile n'est coupée ou n'a de dimension nulle.
+- Clic sur PLAY → bouton immédiatement disabled (indicateur de chargement).
+- Impossible de cliquer deux fois (prévention de double-appel à `advanceDay`).
+- Après la réponse, bouton réactivé, résultats affichés.
 
 ---
 
-#### 4.2.4 UI-BROWSER-04 — Hover states sur les NationCards / StockTiles
-
-**Procédure :**
-
-1. Survoler une StockTile dans la vue Market.
-2. Observer les transitions CSS.
+#### UI-BROWSER-07 — Graphique de prix historique (si implémenté)
 
 **Résultat attendu :**
-- Un état hover distinct est visible (changement de background, bordure accentuée, ou élévation de la carte).
-- La transition est fluide (CSS `transition`, pas de saut brutal).
-- Le curseur devient `pointer` au survol des éléments cliquables.
+- Données provenant de `store.priceHistory[nationId]` — tableau de prix par `dayIndex`.
+- Dernier point = `store.prices[nationId]`.
+- Le graphique ne crash pas si `priceHistory[id]` n'a qu'une entrée (Jour 0).
 
 ---
 
-#### 4.2.5 UI-BROWSER-05 — Tableau des standings de groupe — lisibilité multi-groupes
+### 4.5 Tests spécifiques Mobile
 
-**Procédure :**
+#### UI-MOBILE-01 — Zones tactiles : 44 × 44 px minimum
 
-1. Naviguer vers la vue Standings en phase de groupes (12 groupes actifs).
-2. Observer la grille `.std-grid`.
+| Élément interactif | Dimension minimale |
+|--------------------|-------------------|
+| Chacun des 5 boutons de la Tab Bar | 44 × 44 px (Tab Bar = 64 px de hauteur, largeur = viewport/5) |
+| Bouton central "⚡ PLAY" | 44 × 44 px (généralement plus grand — accentué) |
+| Boutons "Acheter" / "Vendre" dans `TradeModal` | 44 px de hauteur |
+| Bouton de confirmation | 44 px de hauteur |
+| Input de quantité | 44 px de hauteur |
+| Zone cliquable de chaque NationCard | Card entière (padding + height) |
+| Bouton "×" de fermeture des overlays | 44 × 44 px (padding autour de l'icône) |
+| Éléments de liste `ScheduleTab` | 44 px de hauteur par item |
+
+**Procédure :** En DevTools mobile, inspecter la `boundingClientRect` ou les dimensions CSS effectives de chaque élément.
+
+---
+
+#### UI-MOBILE-02 — Tab Bar Bottom Navigation
 
 **Résultat attendu :**
-- La grille utilise `repeat(auto-fill, minmax(280px, 1fr))` — les groupes se répartissent automatiquement.
-- Chaque groupe affiche les 4 équipes avec MP/W/D/L/GF/GA/Pts correctement alignés.
-- À 1440px : 4–5 groupes par ligne.
-- Le scroll vertical fonctionne si les groupes débordent la hauteur visible.
+- 5 onglets : SCHED. · STNDGS · ⚡PLAY · MARKET · PORTF.
+- L'onglet actif est distinctement identifié (couleur `--gold`, fond ou indicateur).
+- La Tab Bar reste fixe en bas même si le contenu est long (`flex-shrink: 0` sur `.nav`).
+- Chaque changement d'onglet démonte l'onglet précédent et monte le suivant (`{tab === 'market' && <MarketTab />}`).
 
 ---
 
-#### 4.2.6 UI-BROWSER-06 — Bouton "PLAY" dans la topbar — état loading et disabled
+#### UI-MOBILE-03 — `100dvh` — barre d'adresse et barre système
+
+**Procédure :** Ouvrir sur Chrome Android ou Safari iOS réel.  
+**Résultat attendu :**
+- `.shell { height: 100dvh }` : viewport dynamique — la Tab Bar n'est pas coupée par la barre système (home indicator, barre d'adresse).
+- Après que l'utilisateur scrolle (barre d'adresse repliée), la mise en page reste cohérente.
+
+---
+
+#### UI-MOBILE-04 — Performance du scroll sur 48 NationCards
 
 **Procédure :**
-
-1. Cliquer sur le bouton "⚡ PLAY" dans la topbar du BrowserShell.
-2. Observer immédiatement l'état du bouton pendant l'appel API.
+1. Onglet MARKET ouvert (48 NationCards).
+2. Activer le profil de perf Chrome DevTools (Performance tab, throttling CPU ×4).
+3. Scroll rapide haut-bas plusieurs fois.
 
 **Résultat attendu :**
-- Le bouton passe immédiatement en état disabled/loading (indicateur visuel — spinner ou opacité réduite).
-- Il ne peut pas être cliqué deux fois (prévention de double-appel à `/api/game/advance`).
-- Après réception de la réponse, le bouton redevient actif et les résultats s'affichent.
+- Frame rate stable ≥ 55 fps.
+- Aucun "jank" visible.
+- `.scroll { overflow-y: auto; scrollbar-width: none }` — scrollbar invisible.
 
 ---
 
-#### 4.2.7 UI-BROWSER-07 — Historique de prix (sparkline/graphique) — cohérence des données
+#### UI-MOBILE-05 — Clavier virtuel — `TradeModal`
 
-**Pré-requis :** S'applique si la feature de graphique de prix est implémentée dans le BrowserShell  
+**Procédure :** Sur device réel, tapper sur l'input de quantité du `TradeModal`.  
+**Résultat attendu :**
+- L'input reste visible (pas masqué derrière le clavier).
+- Le bouton de confirmation reste accessible (le modal remonte avec le clavier).
+- Sur iOS/Safari : pas de "rubber band" bloquant l'interaction avec le modal.
+
+**Comportement à éviter :** Bouton de confirmation entièrement masqué et inaccessible sans fermer le clavier.
+
+---
+
+#### UI-MOBILE-06 — `GuestModal` — focus auto et Turnstile
+
 **Procédure :**
-
-1. Naviguer vers la fiche détaillée d'une nation (`NationDetailOverlay`).
-2. Observer le graphique de prix.
+1. Ouvrir sur un device réel (touch).
+2. Observer si l'input pseudo est auto-focusé.
 
 **Résultat attendu :**
-- Les valeurs sur l'axe Y correspondent aux entrées dans `nation_prices` pour cette nation, triées par `day_index` croissant.
-- Le dernier point du graphique correspond à `nations.current_price`.
-- Le graphique ne crash pas lorsqu'une nation n'a qu'un seul point de données (jour 0).
+- Sur un **device tactile** (`window.matchMedia('(pointer: coarse)').matches === true`) : le focus n'est **pas** déclenché automatiquement (pour éviter l'ouverture du clavier au premier affichage).
+- Sur un **desktop non tactile** : focus après 100 ms.
+- Le widget Turnstile invisible est chargé dynamiquement sans script synchrone.
 
 ---
 
-### 4.3 Tests spécifiques Mobile
+#### UI-MOBILE-07 — Flash d'hydration SSR → MobileShell
 
-#### 4.3.1 UI-MOBILE-01 — Zones tactiles : minimum 44 × 44 px
+**Objectif :** Le flash (BrowserShell pendant 1 frame avant basculement en MobileShell) est imperceptible.
 
-**Objectif :** Chaque élément interactif de l'interface mobile doit avoir une zone de tap d'au moins 44 × 44 px (standard Apple Human Interface Guidelines et WCAG 2.5.5).
-
-**Procédure :**
-
-Pour chaque élément listé, inspecter dans les DevTools (mode device mobile) la `boundingClientRect` ou les dimensions CSS effectives :
-
-| Élément | Dimension minimale requise | Comment mesurer |
-|---------|--------------------------|-----------------|
-| Boutons de la Tab Bar (5 onglets) | 44 × 44 px | Tab bar height 64px, largeur = viewport/5 |
-| Bouton central "⚡ PLAY" | 44 × 44 px (accentué, généralement plus grand) | Inspecter `.play` |
-| Boutons "Acheter" / "Vendre" du `TradeModal` | 44 px de hauteur minimum | CSS height |
-| Bouton de confirmation de trade | 44 px de hauteur | CSS height |
-| Input de quantité dans le `TradeModal` | 44 px de hauteur | CSS height |
-| Lien/bouton de chaque NationCard | Zone cliquable = toute la card | padding + height |
-| Bouton "×" de fermeture des overlays | 44 × 44 px | Padding autour de l'icône |
-| Éléments de la liste des matchs (`ScheduleTab`) | 44 px de hauteur par item | CSS line-height + padding |
-
-**Résultat attendu :** Aucun élément interactif sous les 44 × 44 px. Les éléments trop petits visuellement peuvent avoir leur zone tactile étendue via `padding` ou `min-height` CSS sans agrandir le visuel.
+**Procédure :** Hard Reload sur device réel avec CPU throttling ×4.  
+**Résultat attendu :**
+- Flash < 16 ms (imperceptible à 60 Hz).
+- `export const dynamic = 'force-dynamic'` présent dans `apps/web/app/page.tsx` — Next.js ne met pas en cache la version statique.
 
 ---
 
-#### 4.3.2 UI-MOBILE-02 — Tab Bar Bottom Navigation — comportement et état actif
+#### UI-MOBILE-08 — Redimensionnement live — switch de shell propre
 
 **Procédure :**
-
-1. Taper successivement sur chacun des 5 onglets : SCHED. · STNDGS · PLAY · MARKET · PORTF.
-2. Observer le changement de contenu et l'indicateur d'onglet actif.
+1. BrowserShell à 800 px, `TradeModal` ouvert.
+2. Réduire à 500 px (passage sous 600 px).
 
 **Résultat attendu :**
-- Le contenu change immédiatement (montage/démontage du composant d'onglet).
-- L'onglet actif est visuellement distingué (couleur `--gold`, fond, ou indicateur).
-- Les 4 autres onglets sont à l'état inactif.
-- La Tab Bar reste fixe en bas de l'écran même si le contenu de l'onglet est long et scrollable.
-- `flex-shrink: 0` sur `.nav` — la Tab Bar ne rétrécit pas sous la pression du contenu.
+- `BrowserShell` démonté, `MobileShell` monté.
+- Le `TradeModal` en cours est fermé (état local réinitialisé — comportement documenté).
+- Aucune erreur React `Can't perform a React state update on an unmounted component`.
+- Le store Zustand est intact — cash et portfolio inchangés après le switch.
 
 ---
 
-#### 4.3.3 UI-MOBILE-03 — Gestion de `100dvh` — barre d'adresse et barre système
+### 4.6 Composants partagés
 
-**Objectif :** L'application ne doit pas être coupée par la barre d'adresse du navigateur mobile ni par les barres de navigation système.
+#### UI-SHARED-01 — `TradeModal` — cohérence mobile/browser
+
+**Objectif :** Le `TradeModal` utilise le même store (`useGameStore`) dans les deux shells.
 
 **Procédure :**
+1. Trade via MobileShell → observer le cash dans le header.
+2. Même trade via BrowserShell → observer le cash.
 
-1. Ouvrir l'application sur Chrome Android ou Safari iOS (device réel).
-2. Observer si la Tab Bar est entièrement visible sans être coupée par la barre système.
-3. Faire défiler le contenu de l'onglet MARKET — la Tab Bar doit rester visible.
-4. Tapper sur un input dans le `TradeModal` pour faire apparaître le clavier virtuel.
-
-**Résultat attendu :**
-- `.shell { height: 100dvh }` : `dvh` (dynamic viewport height) ajuste automatiquement la hauteur au viewport réel après que le navigateur a replié sa barre d'adresse.
-- La Tab Bar est toujours entièrement visible, même lorsque le clavier virtuel est affiché (voir UI-MOBILE-05 pour le test clavier).
-- Aucun contenu essentiel n'est masqué derrière une barre système (notch, home indicator).
+**Résultat attendu :** Le cash est débité identiquement. Le fee calculé (`calcTax`) est le même. Le `txLog` est mis à jour dans les deux cas via le même store Zustand.
 
 ---
 
-#### 4.3.4 UI-MOBILE-04 — Performance du scroll sur les listes longues
-
-**Objectif :** Le scroll vertical dans les onglets MARKET, SCHEDULE, et STANDINGS doit être fluide (60 fps) même avec 48 nations ou 17+ journées listées.
-
-**Procédure :**
-
-1. Naviguer vers l'onglet MARKET (48 NationCards affichées).
-2. Activer le profil de performance dans les DevTools Chrome (Performance tab).
-3. Faire défiler rapidement du haut en bas et de bas en haut plusieurs fois.
-4. Observer les métriques de frame rate.
+#### UI-SHARED-02 — `AuthWidget` — compact vs normal
 
 **Résultat attendu :**
-- Frame rate stable à 60 fps, sans chutes sous 30 fps pendant le scroll.
-- Aucun "jank" (saut visuel, freeze) visible.
-- `.scroll { overflow-y: auto; scrollbar-width: none }` : la scrollbar est masquée sur Firefox et invisible sur WebKit.
-- Les NationCards ne "rebondissent" pas (overflow bien contenu dans `.shell`).
-
-**Note technique :** Si des listes très longues causent des problèmes de performance, envisager la virtualisation (`react-virtual` ou `@tanstack/react-virtual`).
+- Mobile (`<AuthWidget compact />`) : avatar ou initiale uniquement, sans libellé texte.
+- Browser (`<AuthWidget />`) : username ou "Connexion" visible.
+- Dans les deux cas, le même flux d'authentification Supabase est déclenché.
 
 ---
 
-#### 4.3.5 UI-MOBILE-05 — Gestion du clavier virtuel sur l'input de mise
-
-**Objectif :** Lorsque le clavier virtuel s'affiche sur iOS/Android après le tap sur l'input de quantité du `TradeModal`, l'interface doit rester utilisable.
-
-**Procédure :**
-
-1. Ouvrir le `TradeModal` depuis l'onglet MARKET.
-2. Tapper sur le champ input de quantité.
-3. Observer le comportement de l'interface lorsque le clavier occupe ~40% de l'écran.
+#### UI-SHARED-03 — Ticker — animation CSS et cohérence des prix
 
 **Résultat attendu :**
-- Le `TradeModal` remonte avec le clavier — les boutons "Acheter" et "Vendre" restent visibles.
-- L'input de quantité est visible et focusé (pas masqué derrière le clavier).
-- La Tab Bar descend hors de l'écran si nécessaire (comportement acceptable), mais le modal reste fonctionnel.
-- Sur iOS avec Safari, le scroll du `TradeModal` fonctionne sans le "rubber band" qui bloque l'interaction.
-
-**Comportement à éviter :**
-- Le bouton de confirmation complètement masqué derrière le clavier sans possibilité de scroll.
-- Le clavier qui repousse l'input lui-même hors du viewport.
+- Animation 100% CSS (pas de re-render React par frame).
+- Prix affichés = `store.prices` au moment du rendu.
+- Hausse → couleur `--gain` (#00FF87), baisse → `--loss` (#FF3B5C).
 
 ---
 
-#### 4.3.6 UI-MOBILE-06 — `MatchAnimation` overlay — rendu et durée
-
-**Pré-requis :** Après la simulation d'une journée dans l'onglet `SimulateTab`  
-**Procédure :**
-
-1. Tapper sur "⚡ PLAY" dans l'onglet Simulate.
-2. Observer l'animation `MatchAnimation`.
-
-**Résultat attendu :**
-- L'overlay de `MatchAnimation` apparaît sur toute la largeur (max 390px, centré).
-- Les résultats des matchs sont affichés lisiblement (score, drapeaux, variation de prix).
-- L'animation se termine en ≤ 5 secondes ou propose un bouton "Passer".
-- Après la fermeture de l'overlay, l'onglet actif est cohérent (les prix sont mis à jour dans MARKET, le classement est mis à jour dans STANDINGS).
-
----
-
-#### 4.3.7 UI-MOBILE-07 — Ticker défilant — performance et lisibilité
-
-**Procédure :**
-
-1. Observer le composant `<Ticker />` dans le header mobile.
-2. Mesurer visuellement la fluidité de l'animation CSS.
-
-**Résultat attendu :**
-- Le ticker défile horizontalement sans saccade.
-- L'animation CSS (`@keyframes` ou `animation`) est accélérée GPU — pas de repaint par frame.
-- Les prix affichés dans le ticker correspondent aux valeurs de `nations.current_price`.
-- Les prix en hausse apparaissent en `--gain` (#00FF87), les prix en baisse en `--loss` (#FF3B5C).
-- Le ticker ne cause pas de re-render React à chaque frame (la logique d'animation est 100% CSS).
-
----
-
-#### 4.3.8 UI-MOBILE-08 — Flash d'hydration SSR → MobileShell
-
-**Objectif :** Détecter et mesurer le flash de BrowserShell → MobileShell lors du premier chargement sur un device mobile.
-
-**Procédure :**
-
-1. Sur un device réel (ou DevTools throttling CPU ×4, réseau 3G), effectuer un Hard Reload de l'application.
-2. Observer les premiers 500ms d'affichage en activant la capture de performance.
-
-**Résultat attendu :**
-- Le flash (BrowserShell affiché pendant 1 frame avant le basculement en MobileShell) doit être imperceptible à l'œil nu (< 16ms sur 60Hz).
-- Si le flash est visible (> 1 frame), envisager d'ajouter `export const dynamic = 'force-dynamic'` sur `page.tsx` (déjà présent) et vérifier que Next.js ne met pas en cache statique la page.
-- Confirmer que `export const dynamic = 'force-dynamic'` est bien présent dans `apps/web/app/page.tsx`.
-
----
-
-#### 4.3.9 UI-MOBILE-09 — Comportement au redimensionnement de fenêtre (desktop → mobile)
-
-**Objectif :** En développement, redimensionner la fenêtre de 800px à 400px doit switcher le shell de façon propre.
-
-**Procédure :**
-
-1. Ouvrir l'application dans Chrome Desktop à 800px.
-2. Naviguer vers la vue Market du BrowserShell et ouvrir un `TradeModal`.
-3. Redimensionner la fenêtre à 400px (passage sous `MOBILE_BREAKPOINT = 600`).
-
-**Résultat attendu :**
-- `useLayout()` détecte `window.innerWidth < 600` et appelle `setLayout('mobile')`.
-- React démonte `BrowserShell` et monte `MobileShell`.
-- Le `TradeModal` en cours d'affichage est fermé (état local réinitialisé — comportement attendu documenté dans RESPONSIVE_DESIGN.md §11.4).
-- L'interface MobileShell est complète et fonctionnelle — pas de composant "fantôme" issu du BrowserShell.
-- Aucune erreur React dans la console (`Warning: Can't perform a React state update on an unmounted component`).
-
----
-
-### 4.4 Tests de composants partagés
-
-#### 4.4.1 UI-SHARED-01 — `TradeModal` — cohérence mobile/browser
-
-**Objectif :** Le `TradeModal` doit fonctionner identiquement dans les deux shells.
-
-**Procédure :**
-
-1. Ouvrir le TradeModal depuis le MobileShell (MarketTab).
-2. Effectuer un trade de test.
-3. Répéter exactement les mêmes étapes depuis le BrowserShell.
-
-**Résultat attendu :**
-- Les deux trades sont traités par la même route `/api/trade` avec les mêmes règles de validation.
-- Le montant du fee affiché est identique dans les deux versions pour le même scénario.
-- La confirmation de trade met à jour le store Zustand `useGameStore` — le cash dans le header est mis à jour dans les deux shells.
-
----
-
-#### 4.4.2 UI-SHARED-02 — `AuthWidget` — comportement compact (mobile) vs normal (browser)
-
-**Procédure :**
-
-1. Observer `<AuthWidget compact />` dans le header mobile.
-2. Observer `<AuthWidget />` dans la topbar browser.
-
-**Résultat attendu :**
-- En mode compact (mobile) : seul l'avatar ou une initiale est affiché, sans libellé texte.
-- En mode normal (browser) : le username ou "Connexion" est visible.
-- Dans les deux cas, cliquer sur le widget ouvre le même flux d'authentification Supabase.
-
----
-
-#### 4.4.3 UI-SHARED-03 — Synchronisation Zustand `useGameStore` entre onglets browser
-
-**Objectif :** L'état du store Zustand est partagé — si un trade est effectué dans un onglet, le portfolio est mis à jour dans tous les composants sans reload.
-
-**Procédure :**
-
-1. Ouvrir le BrowserShell et naviguer vers Portfolio.
-2. Depuis la vue Market, effectuer un achat.
-3. Revenir à Portfolio sans reload.
-
-**Résultat attendu :**
-- La vue Portfolio reflète le nouveau cash et la nouvelle position immédiatement (pas de stale data).
-- Le polling `startSync()` (toutes les 3 secondes) n'est nécessaire que pour refléter les changements d'*autres* joueurs — les propres actions du joueur sont reflétées via le callback de trade (optimistic update ou re-fetch immédiat).
-
----
-
-## ANNEXE A — Commandes de référence pour l'exécution
+## ANNEXE A — Commandes de référence
 
 ```bash
 # Depuis la racine du monorepo
+pnpm lint              # Linter global
+pnpm -r type-check     # Type-check global
+pnpm -r test           # Tests unitaires globaux
+pnpm build             # Build de production
 
-# Linter (tous les workspaces)
-pnpm lint
-
-# Type-check (tous les workspaces)
-pnpm -r type-check
-
-# Tests unitaires (tous les workspaces)
-pnpm -r test
-
-# Build production
-pnpm build
-
-# Serveur de développement
-pnpm dev
-
-# Lancer uniquement les tests du game-engine
+# Ciblé
 pnpm --filter @kickstock/game-engine test
+pnpm --filter web dev
 ```
 
 ---
@@ -1571,18 +1437,21 @@ pnpm --filter @kickstock/game-engine test
 ## ANNEXE B — Requêtes SQL de vérification Supabase
 
 ```sql
--- Vérifier les politiques RLS actives
-SELECT tablename, policyname, cmd, qual, with_check
-FROM pg_policies
-WHERE schemaname = 'public'
+-- Vérifier les politiques RLS actives (chercher portfolios_select_device)
+SELECT tablename, policyname, cmd, qual
+FROM pg_policies WHERE schemaname = 'public'
 ORDER BY tablename, policyname;
 
--- Vérifier l'état courant du jeu
+-- Vérifier les colonnes de la vue leaderboard (p.id ne doit pas y être)
+SELECT column_name FROM information_schema.columns
+WHERE table_name = 'leaderboard' ORDER BY ordinal_position;
+
+-- État courant du jeu
 SELECT current_day_index, current_phase, advancing, champion_id,
        array_length(eliminated, 1) AS nb_eliminated
 FROM game_state WHERE id = 1;
 
--- Vérifier les dividendes distribués lors du dernier avancement
+-- Vérifier les dividendes distribués (dernier avancement)
 SELECT n.flag, n.name, d.round, d.amount, d.shares, d.day_index
 FROM dividends d JOIN nations n ON n.id = d.nation_id
 ORDER BY d.created_at DESC LIMIT 20;
@@ -1598,32 +1467,31 @@ JOIN nations n ON n.id = h.nation_id
 WHERE p.device_id = '<device_id_de_test>'
 ORDER BY h.nation_id;
 
--- Vérifier l'historique des prix d'une nation
+-- Historique des prix d'une nation
 SELECT day_index, price, effective_at
-FROM nation_prices
-WHERE nation_id = 'BRA'
+FROM nation_prices WHERE nation_id = 'BRA'
 ORDER BY day_index ASC;
 
--- Vérifier le leaderboard (ne doit pas exposer portfolio.id)
-SELECT column_name FROM information_schema.columns
-WHERE table_name = 'leaderboard'
-ORDER BY ordinal_position;
+-- Vérifier la table user_game_states (sync cross-device)
+SELECT user_id, (game_state->>'dayIndex')::int AS day, updated_at
+FROM user_game_states ORDER BY updated_at DESC LIMIT 10;
 ```
 
 ---
 
-## ANNEXE C — Matrice de sévérité des vulnérabilités identifiées
+## ANNEXE C — Matrice de statut des vulnérabilités (mise à jour v2.0)
 
-| ID | Titre | Sévérité | Statut | Correction |
-|----|-------|----------|--------|-----------|
-| CRITIQUE-1 | `/api/game/advance` sans auth | 🔴 BLOQUANT | `[ ]` | Ajouter `X-Advance-Secret` header + `ADVANCE_SECRET` env var |
-| CRITIQUE-2 | RLS `portfolios_select_device` expose tous les portfolios | 🔴 BLOQUANT | `[ ]` | `DROP POLICY "portfolios_select_device"` |
-| HAUTE-1 | Hijacking via `X-Device-ID` non validé | 🟠 MAJEUR | `[ ]` | Regex UUID v4 dans `/api/trade` et `/api/game/state` |
-| HAUTE-2 | Vue `leaderboard` expose `portfolios.id` | 🟠 MAJEUR | `[ ]` | Recréer la vue sans `p.id` |
-| MOYENNE | Messages d'erreur PostgreSQL retournés au client | 🟡 MINEUR | `[ ]` | Génériciser les catch en `{ error: 'Internal server error' }` |
+| ID | Titre | Sévérité | Statut | Action requise |
+|----|-------|----------|--------|---------------|
+| CRITIQUE-1 | `/api/game/advance` sans authentification | 🔴 BLOQUANT | **Non corrigé** | Ajouter vérification de rôle admin ou `X-Advance-Secret` |
+| CRITIQUE-2 | RLS `portfolios_select_device` expose tous les portfolios anonymes | 🔴 BLOQUANT | **À vérifier en base** | `DROP POLICY IF EXISTS "portfolios_select_device" ON portfolios;` |
+| HAUTE-1 | UUID v4 non validé dans `/api/trade` | 🟠 MAJEUR | **Partiellement corrigé** — validé dans `/api/game/state` et `/api/auth/guest` seulement | Ajouter regex UUID v4 dans `apps/web/app/api/trade/route.ts` |
+| HAUTE-2 | Vue `leaderboard` expose `portfolios.id` | 🟠 MAJEUR | **À vérifier en base** | Recréer la vue sans `p.id` |
+| MOYENNE | Messages d'erreur internes retournés au client | 🟡 MINEUR | **Corrigé** dans les 3 routes API ✅ | — |
+| NOUVEAU | Plafond 40% absent du mode offline | 🟡 MINEUR | **Écart de parité** — règle présente dans RPC online, absente dans `localGameStore` | Implémenter `calcCap()` dans `@kickstock/game-engine` et l'appeler dans `localGameStore.trade()` |
 
-> **Règle de release :** Les vulnérabilités BLOQUANTES (🔴) doivent être corrigées et les tests RLS-01, RLS-09, SEC-TRADE-01 et SEC-TRADE-02 doivent passer au statut `[x]` avant toute mise en production.
+> **Règle de release :** Les vulnérabilités 🔴 BLOQUANT (CRITIQUE-1, CRITIQUE-2) doivent être corrigées. Les tests **SEC-TRADE-01**, **RLS-01** et **RLS-09** doivent passer au statut `[x]` avant toute mise en production.
 
 ---
 
-*Document généré le 2026-05-26 — À maintenir à jour à chaque évolution du schéma de base de données, des routes API, ou de l'architecture des composants.*
+*Document mis à jour le 2026-05-29 — Version 2.0. À maintenir à chaque évolution du schéma de base de données, des routes API, ou de l'architecture des composants.*

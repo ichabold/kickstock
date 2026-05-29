@@ -44,12 +44,17 @@ export function SimulateButton({ onResults, onNoResults, className, label }: Pro
 
   const dayIndex   = useGameStore(s => s.dayIndex);
   const advanceDay = useGameStore(s => s.advanceDay);
+  const resetGame  = useGameStore(s => s.resetGame);
   const day        = CALENDAR[dayIndex];
 
   const defaultLabel = day ? `⚡ SIMULER — ${day.label}` : '🔄 NOUVEAU JEU';
 
   async function handleClick() {
     if (loading) return;
+    if (!day) {
+      resetGame();
+      return;
+    }
     setLoading(true);
     try {
       const res = await advanceDay();
