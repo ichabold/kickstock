@@ -65,6 +65,7 @@ export async function GET(req: Request) {
   for (const comp of competitions as Competition[]) {
     try {
       const fixtures = await fetchAllFixtures(comp.league_id, comp.season);
+      console.log(`[sync-fixtures] ${comp.name} league=${comp.league_id} season=${comp.season}: API returned ${fixtures.length} fixtures`);
       let upserted = 0;
       let skipped  = 0;
 
