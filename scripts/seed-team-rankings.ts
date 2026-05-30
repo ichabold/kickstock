@@ -264,21 +264,25 @@ async function main() {
   console.log('💾 Writing to database...');
 
   let updated = 0;
+  let failed  = 0;
   for (const r of results) {
     // Update teams.strength
-    await db.from('teams')
+    const { error: e1 } = await db.from('teams')
       .update({ strength: r.strength })
       .eq('id', r.team_id);
+    if (e1) { console.error(`❌ teams.strength [${r.team_id}]: ${e1.message}`); failed++; continue; }
 
     // Update competition_teams.initial_price
-    await db.from('competition_teams')
+    const { error: e2 } = await db.from('competition_teams')
       .update({ initial_price: r.initial_price })
       .eq('team_id', r.team_id)
       .eq('competition_id', comp.id);
+    if (e2) { console.error(`❌ competition_teams.initial_price [${r.team_id}]: ${e2.message}`); failed++; continue; }
 
     updated++;
   }
 
+  if (failed) console.warn(`⚠️  ${failed} teams failed to update.`);
   console.log(`✅ ${updated} teams updated.\n`);
   console.log('📝 Review values in the admin panel before J1. Edits are possible until the first match.\n');
 }
