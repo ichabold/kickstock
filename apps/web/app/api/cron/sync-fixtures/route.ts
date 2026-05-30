@@ -65,6 +65,9 @@ export async function GET(req: Request) {
   for (const comp of competitions as Competition[]) {
     try {
       const fixtures = await fetchAllFixtures(comp.league_id, comp.season);
+      if (!Array.isArray(fixtures)) {
+        throw new Error(`fetchAllFixtures returned non-array: ${typeof fixtures} — value: ${JSON.stringify(fixtures).slice(0, 200)}`);
+      }
       console.log(`[sync-fixtures] ${comp.name}: ${fixtures.length} fixtures`);
 
       // Derive start_date from fixtures (most reliable — avoids DB/REST discrepancies).
