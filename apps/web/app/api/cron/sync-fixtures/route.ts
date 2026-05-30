@@ -89,30 +89,23 @@ export async function GET(req: Request) {
 
         const { teamA, teamB, compTeamA, compTeamB, day, match } = normalized;
 
-        // ── 1. Upsert teams
-        // Only update non-game-design fields (NOT strength — admin-configured)
-        const { error: teamsErr } = await adm(admin).from('teams').upsert(
-          [
-            { id: teamA.id, api_team_id: teamA.api_team_id, name: teamA.name, logo_url: teamA.logo_url, flag_emoji: teamA.flag_emoji },
-            { id: teamB.id, api_team_id: teamB.api_team_id, name: teamB.name, logo_url: teamB.logo_url, flag_emoji: teamB.flag_emoji },
-          ],
-          {
-            onConflict:       'id',
-            ignoreDuplicates: false,
-            // strength is NOT in this payload → will not be overwritten
-          }
-        );
-        if (teamsErr) throw new Error(`teams upsert: ${teamsErr.message}`);
+        // ── 1. Upsert teams individually (NOT strength — admin-configured)
+        for (const t of [teamA, teamB]) {
+          const { error: tErr } = await adm(admin).from('teams').upsert(
+            { id: t.id, api_team_id: t.api_team_id, name: t.name, logo_url: t.logo_url, flag_emoji: t.flag_emoji },
+            { onConflict: 'id', ignoreDuplicates: false }
+          );
+          if (tErr) throw new Error(`teams upsert [${t.id}]: ${tErr.message}`);
+        }
 
-        // ── 2. Upsert competition_teams (group_code only — NOT initial_price)
-        const { error: ctErr } = await adm(admin).from('competition_teams').upsert(
-          [
-            { competition_id: compTeamA.competition_id, team_id: compTeamA.team_id, group_code: compTeamA.group_code },
-            { competition_id: compTeamB.competition_id, team_id: compTeamB.team_id, group_code: compTeamB.group_code },
-          ],
-          { onConflict: 'competition_id,team_id', ignoreDuplicates: false }
-        );
-        if (ctErr) throw new Error(`competition_teams upsert: ${ctErr.message}`);
+        // ── 2. Upsert competition_teams individually (group_code only — NOT initial_price)
+        for (const ct of [compTeamA, compTeamB]) {
+          const { error: ctErr } = await adm(admin).from('competition_teams').upsert(
+            { competition_id: ct.competition_id, team_id: ct.team_id, group_code: ct.group_code },
+            { onConflict: 'competition_id,team_id', ignoreDuplicates: false }
+          );
+          if (ctErr) throw new Error(`competition_teams upsert [${ct.team_id}]: ${ctErr.message}`);
+        }
 
         // ── 3. Upsert competition_days (metadata)
         const { error: dayErr } = await adm(admin).from('competition_days').upsert(
@@ -144,7 +137,7 @@ export async function GET(req: Request) {
           p_scheduled_at:   match.scheduled_at,
           p_api_status:     match.api_status,
         });
-        if (matchErr) throw new Error(`upsert_fixture RPC: ${matchErr.message}`);
+        if (matchErr) throw new Error(`upsert_fixture RPC [fixture=${match.fixture_id} ${match.nation_a}v${match.nation_b}]: ${matchErr.message}`);
 
         upserted++;
       }
