@@ -65,18 +65,22 @@ export async function GET(req: Request) {
   for (const comp of competitions as Competition[]) {
     try {
       const fixtures = await fetchAllFixtures(comp.league_id, comp.season);
-      console.log(`[sync-fixtures] ${comp.name} league=${comp.league_id} season=${comp.season}: API returned ${fixtures.length} fixtures`);
-      console.log(`[sync-fixtures] DEBUG comp=${JSON.stringify(comp)}`);
-      if (fixtures[0]) {
-        const f0 = fixtures[0];
-        const { calcDayIndex } = await import('@/lib/normalizer');
-        console.log(`[sync-fixtures] DEBUG fixture[0].date=${f0.fixture.date} start_date=${comp.start_date} dayIndex=${comp.start_date ? calcDayIndex(f0.fixture.date, comp.start_date) : 'N/A'}`);
-      }
+      console.log(`[sync-fixtures] ${comp.name}: ${fixtures.length} fixtures`);
+
+      // Derive start_date from fixtures (most reliable — avoids DB/REST discrepancies).
+      // The start_date stored in DB may lag behind due to connection pooler caching.
+      const derivedStartDate = fixtures.length > 0
+        ? fixtures.map(f => f.fixture.date.slice(0, 10)).sort()[0]
+        : comp.start_date;
+      const effectiveComp = { ...comp, start_date: derivedStartDate };
+
+      console.log(`[sync-fixtures] start_date: DB=${comp.start_date} derived=${derivedStartDate}`);
+
       let upserted = 0;
       let skipped  = 0;
 
       for (const fixture of fixtures) {
-        const normalized = normalizeFixture(fixture, comp);
+        const normalized = normalizeFixture(fixture, effectiveComp);
         if (!normalized) {
           skipped++;
           continue;
