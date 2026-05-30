@@ -29,4 +29,7 @@ module.exports = withSentryConfig(nextConfig, {
 
   // Don't block builds if Sentry upload fails (no DSN in dev)
   errorHandler: (err) => { console.warn('[sentry] build warning:', err.message); },
+
+  // Sentry 10.x autoInstrumentMiddleware is broken with Next.js 14 (ESM package.json resolution bug)
+  webpack: { autoInstrumentMiddleware: false },
 });
